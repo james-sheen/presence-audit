@@ -1,4 +1,4 @@
-bmc-sensor-audit
+presence-audit
 Copyright 2026 James Sheen
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use
@@ -11,36 +11,32 @@ Unless required by applicable law or agreed to in writing, software distributed
 under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
 CONDITIONS OF ANY KIND, either express or implied.
 
-This project reads OpenBMC `entity-manager` configuration files and walks the
-DMTF Redfish API. It is not affiliated with, endorsed by, or part of the OpenBMC
-project or DMTF.
+This package answers one question: of the points a declaration says should
+exist, which are reading, which are present but not reading, and which are
+absent. It knows nothing about what a point is. That arrives from a vertical,
+through the registry in `vocabulary.py`, and this distribution ships none.
 
-REDISTRIBUTED THIRD-PARTY CONTENT
+NO REDISTRIBUTED THIRD-PARTY CONTENT
 
-`tests/fixtures/upstream/` contains twelve configuration files copied verbatim from
-the OpenBMC `entity-manager` project:
+Nothing here was copied from anywhere else and nothing is vendored. The whole
+distribution is the modules under `src/presence_audit` and the tests beside them.
 
-    Copyright 2018 Intel Corporation
-    Licensed under the Apache License, Version 2.0
-    https://github.com/openbmc/entity-manager
+NO DEPENDENCIES
 
-Their licence is reproduced unmodified at `tests/fixtures/upstream/LICENCE`,
-spelled as upstream spells it. The twelve files are unmodified and byte-identical
-to their sources. `tests/fixtures/upstream/README.md` records which documented
-finding each one reproduces, why these twelve were chosen, and what they do not
-cover.
+The dependency list is empty, and `tests/test_it_names_no_domain.py` asserts it
+is empty rather than trusting the declaration. Nothing is installed alongside
+this package, so there is nothing further to attribute here.
 
-Pinned to upstream commit:
+WHY THIS FILE WAS REPLACED
 
-    0ada048303bb007c9d7ec3a6a90433169f05dd99
+It used to be another distribution's, copied whole when this package was
+extracted from it, and it shipped that way inside the 0.1.0 wheel. It named that
+distribution on its first line, described a hardware protocol this package does
+not implement, and attributed third-party files to a directory this distribution
+has never contained.
 
-Pinning was not the original state, and the reason it is now is worth recording:
-the first snapshot came from a local checkout with no version control metadata,
-so no revision could be named — and by the time anyone looked, two of the nine
-files had been renamed upstream and every corpus count had moved. An unpinned
-snapshot of third-party content does not stay a snapshot; it becomes a claim
-about a revision nobody can identify.
-
-At Stage 2 this project depends on `arbiter-engine`, which is separately
-licensed under the same terms. It is a consumer of that package and not a part
-of it.
+The checks that were meant to prevent exactly this read only `src/presence_audit`
+and could not see a word of it. They now read this file too. A licence notice
+describes one distribution and does not inherit; where a notice names another
+distribution it is making a claim about licensing, which is why the check permits
+only names that appear in the dependency list.
