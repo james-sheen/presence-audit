@@ -144,11 +144,13 @@ def current() -> Vocabulary:
     """The registered vocabulary, or a refusal that says how to supply one."""
     if _REGISTERED is None:
         # Both names are READ from the module that defines them, never spelled
-        # here. Spelled, this message told the reader to set
-        # `BMC_SENSOR_AUDIT_PLUGINS` -- the pre-extraction name, which does
-        # nothing -- and it said so in the one string a user is guaranteed to
-        # see, because it is what a run with no vertical prints. The rename
-        # moved the constant and could not reach a copy of its own value.
+        # here. Spelled, this message named the variable this package used
+        # before it was extracted -- a name that does nothing now -- in the one
+        # string a user is guaranteed to see, since it is what a run with no
+        # vertical prints. The rename moved the constant and could not reach a
+        # copy of its own value. The dead name is not written out here either:
+        # a package whose whole claim is that it names no domain should not
+        # ship one in a comment about having stopped.
         # Imported inside the function: `plugins` imports this module, so the
         # dependency only runs one way at import time.
         from .plugins import ENTRY_POINT_GROUP, ENVIRONMENT_VARIABLE
