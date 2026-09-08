@@ -17,4 +17,4 @@ against. If something here needs a member the protocol does not declare, the
 protocol is wrong -- not the vertical.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
