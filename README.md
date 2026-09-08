@@ -30,6 +30,35 @@ Two installed verticals are **refused rather than ranked**: both would register,
 the later would silently win, and every verdict would come from a domain you were
 not auditing.
 
+## What a vertical supplies
+
+A **sketch, not a runnable block** — the complete member list is
+`vocabulary.Vocabulary`, which documents each one and what an empty answer
+means. Thirteen members; most domains answer several of them with *nothing*.
+
+```
+class MyVocabulary:
+    kinds       = ("tag", "label")      # every class a declared point falls into
+    count_keys  = {"label": "not_a_tag"}  # the ones worth reporting, under YOUR name
+    def classify(self, declared_type): ...        # must return a member of `kinds`
+    def is_auditable(self, kind): ...             # which kinds the audit is about
+    def is_expected_live(self, declared_type): ...
+    # ... and eight more, including the three that let a domain say
+    #     something about its own capture that the pairing cannot see
+
+def register():
+    from presence_audit import vocabulary
+    vocabulary.register(MyVocabulary())
+```
+
+Name `register` on the `presence_audit.plugins` entry point and a plain
+`pip install` finds it. Then `diff.compare(declaration, capture)` answers in
+three states, counting your kinds under your own keys.
+
+**Two installed verticals are refused, not ranked** — both would register, the
+later would win, and every verdict would come from a domain you were not
+auditing. Choose one with the environment variable or your own command line.
+
 ## Status
 
 Extracted from `bmc-sensor-audit`, which keeps its Redfish capture layer, its
