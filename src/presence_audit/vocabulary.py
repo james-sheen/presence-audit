@@ -143,11 +143,20 @@ def register(vocabulary: Vocabulary) -> None:
 def current() -> Vocabulary:
     """The registered vocabulary, or a refusal that says how to supply one."""
     if _REGISTERED is None:
+        # Both names are READ from the module that defines them, never spelled
+        # here. Spelled, this message told the reader to set
+        # `BMC_SENSOR_AUDIT_PLUGINS` -- the pre-extraction name, which does
+        # nothing -- and it said so in the one string a user is guaranteed to
+        # see, because it is what a run with no vertical prints. The rename
+        # moved the constant and could not reach a copy of its own value.
+        # Imported inside the function: `plugins` imports this module, so the
+        # dependency only runs one way at import time.
+        from .plugins import ENTRY_POINT_GROUP, ENVIRONMENT_VARIABLE
         raise VocabularyNotRegistered(
-            "no vertical has registered a vocabulary. One is supplied by an "
-            "entry point in the group 'presence_audit.plugins', by the "
-            "BMC_SENSOR_AUDIT_PLUGINS environment variable, or by --plugin. "
-            "Running without one would classify nothing and report cleanly")
+            f"no vertical has registered a vocabulary. One is supplied by an "
+            f"entry point in the group '{ENTRY_POINT_GROUP}', by the "
+            f"{ENVIRONMENT_VARIABLE} environment variable, or by --plugin. "
+            f"Running without one would classify nothing and report cleanly")
     return _REGISTERED
 
 

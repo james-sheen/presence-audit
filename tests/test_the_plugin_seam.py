@@ -139,3 +139,47 @@ class TestTheSeamIsNamedAfterThisPackage:
         for every other -- the worst of both."""
         assert plugins.ENTRY_POINT_GROUP == "presence_audit.plugins"
         assert plugins.ENVIRONMENT_VARIABLE == "PRESENCE_AUDIT_PLUGINS"
+
+
+class TestTheRefusalTellsTheTruthAboutItself:
+    """The message a user is guaranteed to see, checked against the constants.
+
+    A run with no vertical registered prints this and nothing else, so it is the
+    most-read string in the package -- and it named `BMC_SENSOR_AUDIT_PLUGINS`,
+    the pre-extraction variable, all through 0.1.0. Setting it does nothing. The
+    rename moved the constant; a second copy of its value sat in a message
+    nothing compared against it.
+    """
+
+    def test_it_names_the_variable_that_actually_works(self):
+        from presence_audit import plugins, vocabulary
+        vocabulary.reset()
+        with pytest.raises(vocabulary.VocabularyNotRegistered) as raised:
+            vocabulary.current()
+        assert plugins.ENVIRONMENT_VARIABLE in str(raised.value)
+        assert plugins.ENTRY_POINT_GROUP in str(raised.value)
+
+    def test_it_carries_no_second_copy_of_either_name(self):
+        """The pin that survives the next rename. Asserting the message
+        CONTAINS the right names would still pass if the value were spelled out
+        again beside the import -- so this asserts the source does not spell
+        them, which is the property that made the defect impossible to have."""
+        import inspect
+        from presence_audit import plugins, vocabulary
+        body = inspect.getsource(vocabulary.current)
+        # The import line is the one place either name may appear. Everything
+        # else is a second copy.
+        #
+        # The first version of this assertion looked for `"NAME"` -- the name as
+        # a whole quoted token -- and would have passed over the defect it was
+        # written for, because that one had the name EMBEDDED in a longer
+        # sentence: `"BMC_SENSOR_AUDIT_PLUGINS environment variable, or by ..."`.
+        # Verified by putting the defect back: the token form did not fire.
+        elsewhere = "\n".join(line for line in body.splitlines()
+                              if " import " not in line)
+        for literal in (plugins.ENVIRONMENT_VARIABLE, plugins.ENTRY_POINT_GROUP):
+            assert literal not in elsewhere, (
+                f"{literal!r} is spelled inside current() rather than read from "
+                f"plugins. That is how the message came to name a variable that "
+                f"does nothing: the rename moved the constant and could not "
+                f"reach a copy of its value")
