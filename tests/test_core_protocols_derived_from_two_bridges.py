@@ -1,11 +1,17 @@
-"""The neutral protocols are satisfiable by two bridges that share no code.
+"""The neutral protocols, and the foreign shape that proves they are neutral.
 
 A protocol derived from one implementation is that implementation's types under
 a neutral name. It passes every test its own author would write, and the first
-foreign shape breaks it. So this file adapts BOTH: this package's own capture and
-declaration, and the shape used by an independently built bridge for a different
-domain -- time-ordered samples of many nodes, and an asset register -- which
-shares no code with this one.
+foreign shape breaks it. So this file adapts a shape this package did not come
+from -- time-ordered samples of many nodes, and an asset register -- built here
+out of plain dictionaries and importing nothing.
+
+THE OTHER HALF LIVES IN `test_a_shipped_bridge_satisfies_the_protocols.py`,
+because it adapts a REAL bridge and therefore has to import one. Splitting them
+is the whole point: this file must run in a clone with nothing else installed,
+and it used to be uncollectable there -- one import of a package this
+distribution does not depend on, at module scope, and the entire file was gone,
+including the check that the core imports no vertical.
 
 Both adapters are EXERCISED, not merely defined. `isinstance` against a
 `Protocol` proves the names exist; calling every member through an adapter proves
@@ -27,8 +33,6 @@ import ast
 from pathlib import Path
 
 from presence_audit import protocols as P
-from bmc_sensor_audit.inventory.entity_manager import Declaration, DeclaredSensor
-from bmc_sensor_audit.inventory.redfish import LiveSensor, Walk
 
 CORE = Path(__file__).resolve().parents[1] / "src/presence_audit"
 
@@ -66,58 +70,6 @@ class TestTheCoreImportsNoVertical:
         """The check above passes on an empty directory too. This asserts the
         population it walked was not empty."""
         assert list(CORE.rglob("*.py")), "no core modules were scanned"
-
-
-# --------------------------------------------------------------------------
-# Adapter 1 - this package's own shapes
-# --------------------------------------------------------------------------
-
-class _BmcPoint:
-    def __init__(self, sensor: LiveSensor):
-        self._s = sensor
-
-    name = property(lambda self: self._s.name)
-    path = property(lambda self: self._s.path)
-    reading = property(lambda self: self._s.reading)
-    is_reading = property(lambda self: self._s.is_reading)
-    state = property(lambda self: self._s.state)
-    thresholds = property(lambda self: self._s.thresholds)
-    units = property(lambda self: self._s.units)
-    is_enabled = property(lambda self: self._s.is_enabled)
-
-
-class _BmcCapture:
-    def __init__(self, walk: Walk):
-        self._w = walk
-
-    points = property(lambda self: [_BmcPoint(s) for s in self._w.sensors])
-    captured_at = property(lambda self: self._w.captured_at)
-    complete = property(lambda self: self._w.complete)
-    errors = property(lambda self: self._w.errors)
-
-
-class _BmcDeclared:
-    def __init__(self, sensor: DeclaredSensor):
-        self._d = sensor
-
-    name = property(lambda self: self._d.name)
-    type = property(lambda self: self._d.type)
-    display_name = property(lambda self: self._d.display_name)
-    source = property(lambda self: self._d.source)
-    expects_reading = property(lambda self: self._d.expects_reading)
-    disabled = property(lambda self: self._d.disabled_in_config)
-    thresholds = property(lambda self: self._d.thresholds)
-    is_templated = property(lambda self: self._d.is_templated)
-
-
-class _BmcDeclaration:
-    def __init__(self, declaration: Declaration):
-        self._d = declaration
-
-    points = property(lambda self: [_BmcDeclared(s) for s in self._d.sensors])
-    sources = property(lambda self: self._d.sources)
-    anomalies = property(lambda self: self._d.anomalies)
-    unreadable = property(lambda self: self._d.unreadable)
 
 
 # --------------------------------------------------------------------------
@@ -229,32 +181,6 @@ def _drive(subject, members) -> dict:
                 f"{type(subject).__name__}.{member} raised: "
                 f"{type(error).__name__}: {error}") from error
     return seen
-
-
-class TestThisBridgeSatisfiesTheProtocols:
-    def test_its_capture_drives_every_member(self):
-        walk = Walk(sensors=[
-            LiveSensor(name="Inlet", path="/redfish/v1/a", reading=21.0, state="Enabled"),
-            LiveSensor(name="Dead", path="/redfish/v1/b", reading=None, state="Enabled"),
-        ])
-        capture = _BmcCapture(walk)
-        _drive(capture, CAPTURE_MEMBERS)
-        points = list(capture.points)
-        assert len(points) == 2, "the adapter yielded nothing; the drive was vacuous"
-        for point in points:
-            _drive(point, POINT_MEMBERS)
-
-    def test_its_declaration_drives_every_member(self):
-        decl = Declaration(sensors=[
-            DeclaredSensor(name="Inlet", type="Temperature", label=None,
-                           record=None, source="entity-manager"),
-        ])
-        source = _BmcDeclaration(decl)
-        _drive(source, DECLARATION_MEMBERS)
-        points = list(source.points)
-        assert len(points) == 1, "the adapter yielded nothing; the drive was vacuous"
-        for point in points:
-            _drive(point, DECLARED_MEMBERS)
 
 
 class TestTheOtherBridgeSatisfiesTheProtocols:
