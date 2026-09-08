@@ -120,9 +120,12 @@ def _entity_type(name: str, taken: set[str]) -> str:
 
     Lossy on purpose — the engine's type names are identifiers and sensor names are
     not. The manifest carries the original, because every finding will name this form
-    and a reader needs to get back to the sensor on the board.
+    and a reader needs to get back to the thing it names.
     """
-    base = _UNSAFE.sub("_", name).strip("_") or "sensor"
+    # The fallback when a name sanitises away to nothing. Neutral, because this
+    # string reaches the manifest and every finding built from it, and one
+    # domain's word there is a false statement about every other domain.
+    base = _UNSAFE.sub("_", name).strip("_") or "point"
     if base[0].isdigit():
         base = "s_" + base
     candidate, suffix = base, 2
@@ -453,7 +456,10 @@ def generate(declaration: DeclarationSource, *, domain_id: str,
             flow_outputs=tuple(flow.outputs) if flow is not None else ()))
 
     model = {"domain": {"id": domain_id,
-                        "name": "Generated from entity-manager declarations",
+                        # The generated model's own name, which travels with it
+                        # into the engine and into every report built from it.
+                        # It used to name one domain's declaration format.
+                        "name": "Generated from declarations",
                         "entity_types": entity_types,
                         "indicators": indicators}}
     return model, manifest

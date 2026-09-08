@@ -68,6 +68,8 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import vocabulary as _vocabulary
+
 __all__ = ["ACCEPTED_FORMATS",
            "Supplemental", "RedundantGroup", "Counter", "load_supplemental",
            "SupplementalError", "FORMAT"]
@@ -233,11 +235,13 @@ def load_supplemental(path: str | Path) -> Supplemental:
         if not isinstance(sensors, list) or len(sensors) < 2:
             raise SupplementalError(
                 f"{where} names {sensors!r}; a redundant group needs at least two "
-                f"sensors, because the claim is that they agree with each other")
+                f"{_vocabulary.noun()[1]}, because the claim is that they agree "
+                f"with each other")
         if len(set(sensors)) != len(sensors):
             raise SupplementalError(
-                f"{where} names the same sensor twice; a reading always agrees with "
-                f"itself, so the check would pass while measuring nothing")
+                f"{where} names the same {_vocabulary.noun()[0]} twice; a reading "
+                f"always agrees with itself, so the check would pass while "
+                f"measuring nothing")
         tolerance = block.get("tolerance")
         absolute = block.get("tolerance_absolute")
         if tolerance is not None and absolute is not None:

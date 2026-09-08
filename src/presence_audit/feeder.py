@@ -33,6 +33,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Sequence
 
+from . import vocabulary as _vocabulary
 from .generator import READING, Manifest, peer_property
 
 __all__ = ["FeedResult", "DetectOutcome", "feed", "unmapped_observations",
@@ -319,7 +320,8 @@ def schema_mismatch(envelope: dict) -> str | None:
         return None
     return (f"the engine stamped this envelope schema_version {version!r}; this build "
             f"parses {ENVELOPE_SCHEMA_VERSION}. Every reading below -- findings, "
-            f"declines, the sensor a finding names -- is keyed to the shape that "
+            f"declines, the {_vocabulary.noun()[0]} a finding names -- is keyed to "
+            f"the shape that "
             f"version describes, so the run is reported as incomplete rather than "
             f"interpreted against a contract that moved")
 

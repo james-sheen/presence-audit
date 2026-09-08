@@ -112,6 +112,35 @@ class Vocabulary(Protocol):
         A domain with no notion of redundancy returns an empty sequence.
         """
 
+    @property
+    def noun(self) -> Sequence[str]:
+        """What this domain calls one of the things audited: (singular, plural).
+
+        Used verbatim in the human report, which otherwise has to pick a word --
+        and the word it picked was this distribution's predecessor's. A factory
+        line read `Sensor coverage` and `Every declared sensor is present`.
+
+        OPTIONAL, and that is a decision rather than laziness: this member
+        arrived after two verticals were published, so requiring it would make a
+        lexical improvement a breaking change. A vertical that does not supply
+        one gets `DEFAULT_NOUN`, the word this protocol uses about itself
+        throughout -- neutral and true, rather than another domain's.
+        """
+
+    def count_labels(self) -> Mapping[str, Sequence[str]]:
+        """Report key -> (label, note) for the counts `count_keys` contributes.
+
+        The note is the parenthetical after the number, or the empty string. Both
+        are this domain's words: the core cannot say what its keys mean.
+
+        OPTIONAL. A key with no label is printed under the key itself, which is
+        ugly and visible -- the failure being fixed is the invisible one. The
+        core used to name two keys from this distribution's predecessor
+        directly, so a vertical whose keys were called anything else had those
+        counts silently missing from the text report while the JSON carried
+        them.
+        """
+
     def report_sections(self) -> Mapping[str, object]:
         """Extra top-level report keys this domain contributes, name -> builder.
 
@@ -160,6 +189,63 @@ def current() -> Vocabulary:
             f"{ENVIRONMENT_VARIABLE} environment variable, or by --plugin. "
             f"Running without one would classify nothing and report cleanly")
     return _REGISTERED
+
+
+#: The noun the core falls back to. It is the word this module's own protocol
+#: uses in every docstring above, so a vertical that supplies nothing gets prose
+#: that is neutral and true rather than another domain's.
+DEFAULT_NOUN = ("point", "points")
+
+
+def noun() -> tuple:
+    """The registered domain's (singular, plural), or `DEFAULT_NOUN`.
+
+    Read through `getattr` because the member is optional: a vertical published
+    before it existed answers nothing here and must keep working. A malformed
+    answer falls back too -- a report is not the place to raise.
+    """
+    supplied = getattr(_REGISTERED, "noun", None)
+    try:
+        singular, plural = supplied
+    except (TypeError, ValueError):
+        return DEFAULT_NOUN
+    if not isinstance(singular, str) or not isinstance(plural, str):
+        return DEFAULT_NOUN
+    return (singular, plural)
+
+
+def count_keys() -> Mapping[str, str]:
+    """The registered domain's kind -> report-key mapping, or empty.
+
+    Defensive for the same reason as the others: the text report reads this and
+    must not begin raising in a caller that renders without registering.
+    """
+    supplied = getattr(_REGISTERED, "count_keys", None)
+    return supplied if isinstance(supplied, Mapping) else {}
+
+
+def count_labels() -> Mapping[str, tuple]:
+    """Report key -> (label, note) for this domain's extra counts, or empty."""
+    supplied = getattr(_REGISTERED, "count_labels", None)
+    if supplied is None:
+        return {}
+    try:
+        given = supplied()
+    except Exception:
+        return {}
+    if not isinstance(given, Mapping):
+        return {}
+    out = {}
+    for key, value in given.items():
+        if isinstance(value, str):
+            out[str(key)] = (value, "")
+            continue
+        try:
+            label, note = value
+        except (TypeError, ValueError):
+            continue
+        out[str(key)] = (str(label), str(note))
+    return out
 
 
 def registered() -> bool:

@@ -300,7 +300,8 @@ def _undeclared_prefix_shift(gone: Sequence[CapturedPoint],
 
     return Change(
         "aggregation_prefix_shift", "(topology)",
-        f"{len(gone_names)} sensors whose names all begin {old_prefix!r} are gone, "
+        f"{len(gone_names)} {_vocabulary.noun()[1]} whose names all begin "
+        f"{old_prefix!r} are gone, "
         f"and {len(arrived_names)} whose names all begin {new_prefix!r} have "
         f"appeared with identical remainders. That is the shape of an aggregation "
         f"prefix change, and it is reported rather than paired: nothing in two "
@@ -358,17 +359,19 @@ def compare_walks(before: Capture, after: Capture, *,
         # this module cannot check, so the report says which claim and over what.
         changes.append(Change(
             "aggregation_prefix_paired", new.name,
-            f"paired with {old.name!r} from the earlier walk through the declared "
-            f"prefix map. Everything below about this sensor is judged on that "
-            f"claim; nothing here verified it", old.path, new.path))
+            f"paired with {old.name!r} from the earlier capture through the "
+            f"declared prefix map. Everything below about this "
+            f"{_vocabulary.noun()[0]} is judged on that claim; nothing here "
+            f"verified it", old.path, new.path))
 
     for old, new in pairs:
         if old.name != new.name and id(new) not in renamed_by_prefix:
             changes.append(Change(
                 "sensor_renamed", new.name,
-                f"reported as {old.name!r} in the earlier walk and {new.name!r} in "
-                f"this one, at the same URI. Every dashboard, alert rule and trend "
-                f"query keyed on the old string stops matching",
+                f"reported as {old.name!r} in the earlier capture and "
+                f"{new.name!r} in this one, at the same address. Every dashboard, "
+                f"alert rule and trend query keyed on the old string stops "
+                f"matching",
                 old.path, new.path))
         # Change rules only this domain can state. Each one reads something the
         # other bridge's capture does not have, so the neutral gate asks rather
@@ -387,8 +390,8 @@ def compare_walks(before: Capture, after: Capture, *,
         for old in gone:
             changes.append(Change(
                 "sensor_removed", old.name,
-                f"reported at {old.path} in the earlier walk and not reported at all "
-                f"in this one, under any name or URI", old.path, None))
+                f"reported at {old.path} in the earlier capture and not reported "
+                f"at all in this one, under any name or address", old.path, None))
         for new in arrived:
             changes.append(Change(
                 "sensor_added", new.name,
@@ -404,8 +407,9 @@ def compare_walks(before: Capture, after: Capture, *,
         changes.append(Change(
             "walk_incomplete", "(walk)",
             f"{incomplete} capture did not complete, so a point missing from it "
-            f"cannot be told apart from a subtree that was never read. Sensors "
-            f"appearing and disappearing are not reported"))
+            f"cannot be told apart from a subtree that was never read. "
+            f"{_vocabulary.noun()[1].capitalize()} appearing and disappearing are "
+            f"not reported"))
 
     changes.extend(_vocabulary.current().capture_changes(before, after))
 

@@ -338,8 +338,9 @@ def compare(declaration: DeclarationSource, walk: Capture, *,
         if not live.is_enabled:
             findings.append(Finding(
                 "declared_disabled", name,
-                f"declared and present, but the BMC reports State={live.state!r}. "
-                f"A disabled sensor is typically invisible in the web UI",
+                f"declared and present, but the capture reports "
+                f"State={live.state!r}. A disabled {_vocabulary.noun()[0]} is "
+                f"typically invisible wherever this domain normally shows them",
                 match.declared.source, live.path))
         elif live.reading is None:
             findings.append(Finding(

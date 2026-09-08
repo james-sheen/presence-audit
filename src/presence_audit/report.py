@@ -1,12 +1,19 @@
-"""Render a diff two ways: for a machine, and for a hardware engineer.
+"""Render a diff two ways: for a machine, and for the person who owns the thing.
 
-Acceptance criterion 4 of Stage 1 is that a before/after run produces a diff a
-hardware engineer can read without explanation. That rules out a wall of JSON,
-and it rules out a summary that hides which sensor is affected.
+Acceptance criterion 4 of Stage 1 is that a before/after run produces a diff its
+owner can read without explanation. That rules out a wall of JSON, and it rules
+out a summary that hides which point is affected.
 
-The human view leads with the counts, because the first question is always "how
-much of this board is fine", and then lists findings grouped by kind with the
-most actionable first. The machine view is stable, sorted, and carries the
+THE WORDS ARE THE DOMAIN'S, NOT THIS MODULE'S. Every noun a reader sees comes
+from `vocabulary.noun()`, because a module that cannot name the domain cannot
+name the things in it either. This file used to spell one domain's word into
+forty sentences, so a factory line was told about its `Sensor coverage` and its
+`firmware`. A neutral core that picks a vertical's vocabulary is not neutral --
+it just has a favourite.
+
+The human view leads with the counts, because the first question is always how
+much of it is fine, and then lists findings grouped by kind with the most
+actionable first. The machine view is stable, sorted, and carries the
 attribution -- which config declared it, which URI reported it -- because a
 finding without a source is a finding nobody can act on.
 """
@@ -23,6 +30,7 @@ from . import vocabulary as _vocabulary
 from .protocols import Capture
 
 __all__ = ["as_json", "as_text", "KIND_ORDER", "regression_as_text",
+           "headlines", "change_headlines",
            "regression_as_json", "supplemental_as_text", "unattested_notice",
            "declaration_sources_as_text", "CHANGE_ORDER"]
 
@@ -47,24 +55,45 @@ KIND_ORDER = (
     "matched_inexactly",
 )
 
-_HEADLINE = {
-    "declared_absent": "Declared and not reported at all",
-    "declared_disabled": "Present but switched off",
-    "declared_unreadable": "Present and enabled, but not reading",
-    "threshold_missing": "Declared threshold absent on the live sensor",
-    "threshold_drift": "Threshold moved between config and machine",
-    "threshold_direction_conflict": "Config contradicts itself about which side it guards",
-    "interface_divergence": "Present on one Redfish interface, absent from the other",
-    "unknown_threshold_direction": "Threshold direction not recognised",
-    "unclassified_threshold_level": "Threshold severity level not recognised",
-    "unreadable_threshold_value": "Threshold value is not a number",
-    "malformed_exposes": "Malformed configuration record",
-    "config_unreadable": "Configuration file could not be read",
-    "walk_incomplete": "The walk did not finish",
-    "disabled_in_config_but_live": "Config says disabled; the machine is reporting it",
-    "undeclared_present": "Reported by the machine and declared nowhere",
-    "matched_inexactly": "Paired by something other than an exact name",
-}
+def headlines(singular: str | None = None) -> dict:
+    """The kind headlines, in the domain's own noun.
+
+    PUBLIC. It was `_HEADLINE`, a module constant, and a consumer imported the
+    private name to assert that every kind it ships is ranked and titled. That
+    is a real invariant and it was being checked from the wrong repository --
+    the core owns both lists, so the core owns the question. `TestEveryKindHasA
+    Headline` in this distribution now asks it, and the name is public so a
+    consumer can ask it too without reaching past an underscore.
+
+    A function rather than a module constant because the noun is not known at
+    import time -- a vertical registers after this module is loaded, and a dict
+    built at import would freeze whichever domain happened to be first.
+    """
+    if singular is None:
+        singular = _vocabulary.noun()[0]
+    return {
+        "declared_absent": "Declared and not reported at all",
+        "declared_disabled": "Present but switched off",
+        "declared_unreadable": "Present and enabled, but not reading",
+        "threshold_missing": f"Declared threshold absent on the live {singular}",
+        "threshold_drift": "Threshold moved between declaration and machine",
+        "threshold_direction_conflict":
+            "The declaration contradicts itself about which side it guards",
+        # Was `Present on one Redfish interface`. The kind is about two
+        # interfaces disagreeing, which is a shape, not a protocol -- naming one
+        # protocol here made every other domain's copy of this sentence false.
+        "interface_divergence": "Present on one interface, absent from the other",
+        "unknown_threshold_direction": "Threshold direction not recognised",
+        "unclassified_threshold_level": "Threshold severity level not recognised",
+        "unreadable_threshold_value": "Threshold value is not a number",
+        "malformed_exposes": "Malformed declaration record",
+        "config_unreadable": "Declaration file could not be read",
+        "walk_incomplete": "The capture did not finish",
+        "disabled_in_config_but_live":
+            "The declaration says disabled; the machine is reporting it",
+        "undeclared_present": "Reported by the machine and declared nowhere",
+        "matched_inexactly": "Paired by something other than an exact name",
+    }
 
 
 def as_json(report: DiffReport, *, target: str | None = None,
@@ -115,9 +144,16 @@ def declaration_sources_as_text(sources: Sequence[Any]) -> list[str]:
     """
     if not sources:
         return []
-    lines = ["  Declared partly from sources other than entity-manager:"]
+    # `protocols.DeclarationSource.sources` promises `Sequence[object]` -- the
+    # files or authorities read. It does NOT promise `provenance_line()`, and
+    # calling it unconditionally made this function crash for the first domain
+    # that answered with what the protocol allows: plain strings. A requirement
+    # the protocol does not declare is one nobody outside can discover, and
+    # nothing on either side could fail while one domain happened to satisfy it.
+    lines = ["  Declared partly from additional sources:"]
     for source in sources:
-        lines.append(f"    {source.provenance_line()}")
+        described = getattr(source, "provenance_line", None)
+        lines.append(f"    {described() if callable(described) else source}")
     return lines + [""]
 
 
@@ -127,45 +163,74 @@ def _ordered(report: DiffReport) -> list:
                   key=lambda f: (rank.get(f.kind, len(KIND_ORDER)), f.sensor))
 
 
+#: The counts this module owns: the label it prints, the key, the field width.
+#: ONE record, because the loop below prints from it AND `_CORE_COUNT_KEYS` is
+#: derived from it. Written twice, the two would disagree and the disagreement
+#: would show up as a vertical's count printed under a core label.
+_CORE_COUNTS = (
+    ("  declared          ", "declared", 5),
+    ("  matched           ", "matched", 5),
+    ("    reading         ", "reading", 5),
+    ("    not reading     ", "present_not_reading", 5),
+    ("  declared, absent  ", "declared_absent", 5),
+    ("  present, undeclared ", "undeclared_present", 3),
+)
+
+#: Everything else in `counts` came from the vertical. `findings` and
+#: `regressions` are the core's too; they are printed in the verdict line rather
+#: than the summary block, which is why they are added here by hand.
+_CORE_COUNT_KEYS = tuple(key for _, key, _ in _CORE_COUNTS) + ("findings", "regressions")
+
+
 def as_text(report: DiffReport, *, target: str | None = None) -> str:
+    singular, _plural = _vocabulary.noun()
+    kind_headlines = headlines(singular)
     counts = report.counts()
     lines: list[str] = []
-    header = f"Sensor coverage: {target}" if target else "Sensor coverage"
+    # SINGULAR, used attributively -- `Sensor coverage`, not `Sensors coverage`.
+    # Built from the plural at first, which read as a typo and changed a line
+    # this distribution's own consumer has published since its first release.
+    title = f"{singular[:1].upper()}{singular[1:]} coverage"
+    header = f"{title}: {target}" if target else title
     lines.append(header)
     lines.append("=" * len(header))
     lines.append("")
     lines.extend(declaration_sources_as_text(report.declaration_sources))
-    lines.append(f"  declared          {counts['declared']:>5}")
-    lines.append(f"  matched           {counts['matched']:>5}")
-    lines.append(f"    reading         {counts['reading']:>5}")
-    lines.append(f"    not reading     {counts['present_not_reading']:>5}")
-    lines.append(f"  declared, absent  {counts['declared_absent']:>5}")
-    lines.append(f"  present, undeclared {counts['undeclared_present']:>3}")
+    for label, key, width in _CORE_COUNTS:
+        lines.append(f"{label}{counts[key]:>{width}}")
 
-    # Declarations set aside before expectation. Printed even when zero would be
-    # wrong -- printed when NON-zero, because an exclusion the reader cannot see is
-    # indistinguishable from a checker that forgot to look. The unrecognised line
-    # is the one that matters: it is the tool admitting it does not know, and it is
-    # how the classification gets corrected.
-    if counts.get("not_a_sensor"):
-        lines.append(f"  not sensors       {counts['not_a_sensor']:>5}"
-                     "   (PID loops, EEPROMs, firmware, muxes -- cannot report a reading)")
-    if counts.get("unrecognised_type"):
-        lines.append(f"  type unrecognised {counts['unrecognised_type']:>5}"
-                     "   (not classified either way; NOT counted as absent)")
-        for sensor in report.not_sensor_kinds.get("unrecognised", [])[:10]:
-            lines.append(f"      {sensor.display_name}  [{sensor.type}]")
+    # Declarations set aside before expectation. Printed when NON-zero, because an
+    # exclusion the reader cannot see is indistinguishable from a checker that
+    # forgot to look.
+    #
+    # ITERATED, NOT NAMED. These keys belong to the vertical -- `count_keys` is a
+    # vocabulary member and `diff.counts()` already builds them from it. This block
+    # used to name two of them, `not_a_sensor` and `unrecognised_type`, which are
+    # this distribution's predecessor's. A vertical whose keys were called anything
+    # else had these counts present in the JSON and silently missing from the text,
+    # which is the worse half: the reader sees a shorter list and no sign that one
+    # exists. The labels are the domain's too, because the core cannot say what a
+    # key it did not choose means.
+    labels = _vocabulary.count_labels()
+    kind_of = {key: kind for kind, key in _vocabulary.count_keys().items()}
+    for key, value in counts.items():
+        if key in _CORE_COUNT_KEYS or not value:
+            continue
+        label, note = labels.get(key, (key, ""))
+        lines.append(f"  {label:<18}{value:>5}" + (f"   ({note})" if note else ""))
+        for entry in report.not_sensor_kinds.get(kind_of.get(key, ""), [])[:10]:
+            lines.append(f"      {entry.display_name}  [{entry.type}]")
     lines.append("")
 
     if not report.walk_complete:
-        lines.append("  ** THE WALK DID NOT FINISH. Absence findings are withheld,")
-        lines.append("     because an unread subtree and a missing sensor look the")
+        lines.append("  ** THE CAPTURE DID NOT FINISH. Absence findings are withheld,")
+        lines.append(f"     because an unread subtree and a missing {singular} look the")
         lines.append("     same from here. Fix the transport and re-run. **")
         lines.append("")
 
     if not report.findings:
-        lines.append("  No findings. Every declared sensor is present and reading,")
-        lines.append("  and nothing is reporting that the configuration does not declare.")
+        lines.append(f"  No findings. Every declared {singular} is present and reading,")
+        lines.append("  and nothing is reporting that the declaration does not declare.")
         return "\n".join(lines)
 
     grouped: dict[str, list] = {}
@@ -173,7 +238,7 @@ def as_text(report: DiffReport, *, target: str | None = None) -> str:
         grouped.setdefault(finding.kind, []).append(finding)
 
     for kind, findings in grouped.items():
-        title = _HEADLINE.get(kind, kind)
+        title = kind_headlines.get(kind, kind)
         flag = " (regression)" if findings[0].is_regression else ""
         lines.append(f"{title} -- {len(findings)}{flag}")
         lines.append("-" * len(f"{title} -- {len(findings)}{flag}"))
@@ -213,20 +278,28 @@ CHANGE_ORDER = (
     "aggregation_prefix_paired",
 )
 
-_CHANGE_HEADLINE = {
+def change_headlines(singular: str | None = None) -> dict:
+    """Change headlines, in the domain's own noun. Public for the same reason
+    `headlines` is, and a function for the same reason: the noun is not known at
+    import time."""
+    if singular is None:
+        singular = _vocabulary.noun()[0]
+    return {
     "sensor_removed": "Reported before, not reported now",
-    "sensor_renamed": "Same URI, different name",
+    "sensor_renamed": "Same address, different name",
     "reading_lost": "Still enabled, no longer reading",
-    "sensor_disabled": "Switched off since the earlier walk",
-    "threshold_removed": "Threshold the earlier firmware carried is gone",
+    "sensor_disabled": "Switched off since the earlier capture",
+    # Was `the earlier firmware`. What carried the threshold is the earlier
+    # CAPTURE -- true of a BMC, a PLC and anything else that gets captured twice.
+    "threshold_removed": "Threshold the earlier capture carried is gone",
     "threshold_moved": "Threshold value changed",
     "units_changed": "Reading units changed",
-    "tree_shape_gone": "A Redfish interface stopped being served",
+    "tree_shape_gone": "An interface stopped being served",
     "field_drift": "New properties the published schema does not declare",
     "walk_incomplete": "A walk did not finish",
     "threshold_added": "A threshold appeared",
     "sensor_enabled": "Switched on since the earlier walk",
-    "sensor_added": "Reported now, absent from the earlier walk",
+    "sensor_added": "Reported now, absent from the earlier capture",
     "aggregation_prefix_shift": "A subtree may have moved behind a new prefix",
     "aggregation_prefix_paired": "Paired across a declared aggregation prefix",
 }
@@ -262,15 +335,17 @@ def regression_as_json(report: RegressionReport, *, before: str, after: str) -> 
 
 def regression_as_text(report: RegressionReport, *, before: str, after: str) -> str:
     lines: list[str] = []
-    header = "Firmware regression"
+    singular, plural = _vocabulary.noun()
+    titles = change_headlines(singular)
+    header = "Capture regression"
     lines.append(header)
     lines.append("=" * len(header))
     lines.append("")
     lines.append(f"  before  {before}")
     lines.append(f"  after   {after}")
     lines.append("")
-    lines.append(f"  sensors before    {report.before_count:>5}")
-    lines.append(f"  sensors after     {report.after_count:>5}")
+    lines.append(f"  {plural + ' before':<18}{report.before_count:>5}")
+    lines.append(f"  {plural + ' after':<18}{report.after_count:>5}")
     lines.append(f"  paired            {report.paired:>5}")
     if report.prefix_paired:
         # Broken out rather than folded into `paired`, because these rest on a claim
@@ -281,9 +356,9 @@ def regression_as_text(report: RegressionReport, *, before: str, after: str) -> 
 
     if not report.complete:
         lines.append("")
-        lines.append("  ** A WALK DID NOT FINISH. Sensors appearing and disappearing")
-        lines.append("     are not reported, because an unread subtree and a removed")
-        lines.append("     sensor look the same from here. **")
+        lines.append(f"  ** A CAPTURE DID NOT FINISH. {plural.capitalize()} appearing and")
+        lines.append("     disappearing are not reported, because an unread subtree and")
+        lines.append(f"     a removed {singular} look the same from here. **")
 
     if not report.fields_comparable:
         # Said out loud rather than left as an empty section. One of these captures
@@ -296,7 +371,7 @@ def regression_as_text(report: RegressionReport, *, before: str, after: str) -> 
     lines.append("")
 
     if not report.changes:
-        lines.append("  No changes. Every sensor reported before is reported now,")
+        lines.append(f"  No changes. Every {singular} reported before is reported now,")
         lines.append("  under the same name, units, state and thresholds.")
         return "\n".join(lines)
 
@@ -305,7 +380,7 @@ def regression_as_text(report: RegressionReport, *, before: str, after: str) -> 
         grouped.setdefault(change.kind, []).append(change)
 
     for kind, changes in grouped.items():
-        title = _CHANGE_HEADLINE.get(kind, kind)
+        title = titles.get(kind, kind)
         flag = " (regression)" if changes[0].is_regression else ""
         lines.append(f"{title} -- {len(changes)}{flag}")
         lines.append("-" * len(f"{title} -- {len(changes)}{flag}"))
@@ -315,15 +390,15 @@ def regression_as_text(report: RegressionReport, *, before: str, after: str) -> 
         lines.append("")
 
     if report.absence_withheld and any(c.kind == "sensor_renamed" for c in report.changes):
-        lines.append("  A rename is reported only where the URI stayed the same. A")
-        lines.append("  sensor whose name AND URI both changed appears above as one")
-        lines.append("  removal and one addition -- but absence is withheld on this")
+        lines.append("  A rename is reported only where the address stayed the same.")
+        lines.append(f"  A {singular} whose name AND address both changed appears above as")
+        lines.append("  one removal and one addition -- but absence is withheld on this")
         lines.append("  run, so neither is shown.")
         lines.append("")
     elif any(c.kind in ("sensor_removed", "sensor_added") for c in report.changes):
-        lines.append("  A rename is reported only where the URI stayed the same. A")
-        lines.append("  sensor whose name AND URI both changed appears above as one")
-        lines.append("  removal and one addition; nothing in two walks says which")
+        lines.append("  A rename is reported only where the address stayed the same.")
+        lines.append(f"  A {singular} whose name AND address both changed appears above as")
+        lines.append("  one removal and one addition; nothing in two captures says which")
         lines.append("  addition replaced which removal, so this does not guess.")
         lines.append("")
 
@@ -400,10 +475,11 @@ def detect_as_text(outcome, feed_result) -> str:
     """Render the Stage 2 verdict.
 
     Written so the three decline classes stay visibly different. Collapsing them into
-    one list would hide the distinction the exit code is built on: a sensor whose value
-    never arrived is a defect, a sensor without enough history yet is a fact, and a
+    one list would hide the distinction the exit code is built on: a point whose value
+    never arrived is a defect, a point without enough history yet is a fact, and a
     reason this build does not recognise is neither and must not be filed as either.
     """
+    singular, _plural = _vocabulary.noun()
     lines = ["", "Liveness (Stage 2)", "------------------"]
     if outcome.schema_mismatch:
         # First, and not folded into the finding list. Everything below it was read
@@ -418,7 +494,7 @@ def detect_as_text(outcome, feed_result) -> str:
                      "   (Stage 1 owns absence; the engine is not asked)")
     if feed_result.skipped_not_modelled:
         lines.append(f"  not modelled         {feed_result.skipped_not_modelled:>5}"
-                     "   (templated, non-sensor, or no thresholds to bound against)")
+                     "   (templated, not auditable, or no thresholds to bound against)")
     if outcome.checked:
         lines.append(f"  invariants checked   {outcome.checked.get('invariants', 0):>5}"
                      f"   over {outcome.checked.get('entities', 0)} entities")
@@ -440,8 +516,8 @@ def detect_as_text(outcome, feed_result) -> str:
     if warming:
         shown = sorted(warming.items())[:5]
         lines.append("")
-        lines.append(f"  Liveness warming up -- {len(warming)} sensor(s) below the "
-                     "sample floor; stuck-at cannot be judged yet:")
+        lines.append(f"  Liveness warming up -- {len(warming)} {singular}(s) below "
+                     "the sample floor; stuck-at cannot be judged yet:")
         for name, count in shown:
             lines.append(f"      {name}: {count} sample(s)")
         if len(warming) > len(shown):
