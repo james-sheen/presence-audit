@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "presence-audit"
+# Read from the package rather than duplicated here: a version written twice is
+# a version that will disagree with itself.
+dynamic = ["version"]
+description = "Given a declaration and a capture, say which declared points are reading, present but not reading, or absent."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{name = "James Sheen"}]
+keywords = ["audit", "presence", "declaration", "attestation", "regression"]
+# NONE, and deliberately. Nothing here imports a third-party package at module
+# scope; a vertical supplies the domain and a judge is optional. Adding a
+# dependency to this list is a claim that the presence question cannot be
+# answered without it.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.urls]
+Homepage = "https://github.com/james-sheen/presence-audit"
+Source = "https://github.com/james-sheen/presence-audit"
+Issues = "https://github.com/james-sheen/presence-audit/issues"
+
+[tool.hatch.version]
+path = "src/presence_audit/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/presence_audit"]
