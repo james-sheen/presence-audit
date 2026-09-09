@@ -2,8 +2,8 @@
 
 The neutral machinery classifies declared points and reports how many fell into
 each class. Both of those need a vocabulary, and the vocabulary is the domain:
-one bridge's kinds are sensors and not-sensors, another's are assets and
-fixtures. So it is supplied, not imported.
+one bridge's kinds split its readings from everything else, another's are assets
+and fixtures. So it is supplied, not imported.
 
 **The count keys are part of this, and that is not obvious.** The report a
 consumer reads carries per-kind counts under key names taken from the domain. If
@@ -120,7 +120,8 @@ class Vocabulary(Protocol):
 
         Used verbatim in the human report, which otherwise has to pick a word --
         and the word it picked was this distribution's predecessor's. A factory
-        line read `Sensor coverage` and `Every declared sensor is present`.
+        line was told about its coverage in a word from a different domain, in
+        every heading and every sentence of its own report.
 
         OPTIONAL, and that is a decision rather than laziness: this member
         arrived after two verticals were published, so requiring it would make a

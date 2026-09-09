@@ -6,10 +6,10 @@ out a summary that hides which point is affected.
 
 THE WORDS ARE THE DOMAIN'S, NOT THIS MODULE'S. Every noun a reader sees comes
 from `vocabulary.noun()`, because a module that cannot name the domain cannot
-name the things in it either. This file used to spell one domain's word into
-forty sentences, so a factory line was told about its `Sensor coverage` and its
-`firmware`. A neutral core that picks a vertical's vocabulary is not neutral --
-it just has a favourite.
+name the things in it either. This file used to spell one domain's words into
+every sentence it printed, so a factory line was told about its coverage, and
+about its equipment, in nouns belonging to a different industry. A neutral core
+that picks a vertical's vocabulary is not neutral -- it just has a favourite.
 
 The human view leads with the counts, because the first question is always how
 much of it is fine, and then lists findings grouped by kind with the most
@@ -187,9 +187,10 @@ def as_text(report: DiffReport, *, target: str | None = None) -> str:
     kind_headlines = headlines(singular)
     counts = report.counts()
     lines: list[str] = []
-    # SINGULAR, used attributively -- `Sensor coverage`, not `Sensors coverage`.
-    # Built from the plural at first, which read as a typo and changed a line
-    # this distribution's own consumer has published since its first release.
+    # SINGULAR, used attributively: the domain's own singular noun followed by
+    # `coverage`, never its plural. Built from the plural at first, which read as
+    # a typo and changed a line this distribution's own consumer has published
+    # since its first release.
     title = f"{singular[:1].upper()}{singular[1:]} coverage"
     header = f"{title}: {target}" if target else title
     lines.append(header)

@@ -1,10 +1,10 @@
-"""Declarations the machine does not make about itself, written down by an operator.
+"""Declarations the system does not make about itself, written down by an operator.
 
-Two axioms need a fact `entity-manager` has no way to state, and neither can be
-derived from the configuration however carefully it is read:
+Two axioms need a fact the declaration format has no way to state, and neither can
+be derived from the declaration however carefully it is read:
 
 **Redundancy.** CONSISTENCY can check that two readings which should agree do.
-Nothing in `entity-manager` says two sensors measure the same thing. The tempting
+Nothing in a declaration says two points measure the same thing. The tempting
 derivation is the multi-channel part -- a TMP421 declares `Name` and `Name1`, so pair
 them -- and it is wrong on the physics: those two channels are the chip's own die and
 an external diode, which differ by tens of degrees on a working board. The other
@@ -32,7 +32,7 @@ same kind of number as a threshold floor and gets the same treatment: declared, 
 its basis, or absent.
 
 Those two readings also carry **no thresholds at all**, so the generator's ordinary
-rule excludes them -- a sensor with nothing to bound against is a question nobody
+rule excludes them -- a point with nothing to bound against is a question nobody
 asked. Naming one in a flow is what asks the question, so a flow participant is
 modelled whether or not it has bounds.
 
@@ -56,8 +56,8 @@ specification and a guess, and it is the field a reviewer reads first. A group w
 one is refused rather than accepted with a warning, because a warning on a path that
 still works is a warning nobody reads.
 
-Sensors are named as the declaration names them -- `display_name`, so a pmbus rail is
-`NAME:LABEL`. A name this file mentions and the declaration does not is refused too:
+Points are named as the declaration names them -- `display_name`, whatever shape
+that takes. A name this file mentions and the declaration does not is refused too:
 the likeliest cause is a typo, and a typo silently drops the pairing it was written to
 create, leaving a file that looks like the check is running.
 """
@@ -106,7 +106,7 @@ class RedundantGroup:
         One side declares it, not both. The engine's agreement test is symmetric --
         it divides by `max(abs(a), abs(b))` precisely so that `a agrees with b` means
         the same as `b agrees with a` -- so declaring it twice would produce two
-        findings for one disagreement and double-count a single drifting sensor.
+        findings for one disagreement and double-count a single drifting point.
         """
         return self.sensors[0]
 
@@ -151,7 +151,7 @@ class Supplemental:
         return bool(self.redundant_groups or self.counters or self.flows)
 
     def flow_for(self, display_name: str) -> Flow | None:
-        """The flow this sensor is the INPUT of, if any. The outputs are carried as
+        """The flow this point is the INPUT of, if any. The outputs are carried as
         properties on the input's entity, the same way redundant peers are."""
         for flow in self.flows:
             if flow.input == display_name:
@@ -159,7 +159,7 @@ class Supplemental:
         return None
 
     def modelled_regardless(self) -> set[str]:
-        """Sensors that must be modelled even with nothing to bound against.
+        """Points that must be modelled even with nothing to bound against.
 
         A flow's readings routinely carry no thresholds -- the pinned Mt.Jade PSU
         entries declare `pin` and `pout1` with bounds on neither -- and the ordinary
@@ -169,7 +169,7 @@ class Supplemental:
         return {name for flow in self.flows for name in flow.members}
 
     def group_for(self, display_name: str) -> RedundantGroup | None:
-        """The group this sensor leads, if it leads one."""
+        """The group this point leads, if it leads one."""
         for group in self.redundant_groups:
             if group.primary == display_name:
                 return group
@@ -185,7 +185,7 @@ class Supplemental:
         return None
 
     def names(self) -> set[str]:
-        """Every sensor name this file mentions, for the cross-check against the
+        """Every point name this file mentions, for the cross-check against the
         declaration."""
         named = {s for group in self.redundant_groups for s in group.sensors}
         named |= {name for flow in self.flows for name in flow.members}

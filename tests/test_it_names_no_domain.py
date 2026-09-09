@@ -31,12 +31,29 @@ module checks are:
     the permitted names are this one plus whatever the dependency list declares
     -- which means adding a real dependency licenses naming it, in the same edit.
 
-WHAT IS STILL OUT OF REACH, written down rather than left to be discovered: a
-domain named in ordinary words. `OpenBMC` and `Redfish` are capitalised nouns
-carrying no hyphen, no path and no backtick, and no structural predicate here
-distinguishes them from any other proper noun a notice may legitimately carry.
-The 0.1.0 defect is caught by the checks below because it also named a path and
-a distribution. One that only prosed about a domain would not be.
+WHAT WAS OUT OF REACH, AND WHAT NOW IS NOT. This file used to record that a
+domain named in ORDINARY WORDS could not be caught structurally, because a
+capitalised noun carrying no hyphen, no path and no backtick is indistinguishable
+from any other proper noun. That was true of proper nouns and it was too wide: it
+gave up on the one ordinary word that IS derivable, and the cost of giving up was
+that the extraction which this file certifies as domain-free left the domain in
+its own documentation. Seventy-four lines of it, across seven of eleven modules --
+module docstrings explaining the product in one vertical's noun, and design
+reasons written in that vertical's part numbers and corpus statistics.
+
+The import graph could not see it, and this file's opening claim was made from
+the import graph. The predicate was cheaper than the claim.
+
+What is derivable is the vertical's OWN WORD FOR WHAT IT AUDITS. A vocabulary
+declares `noun`, defined as *what this domain calls one of the things audited* --
+so the forbidden set is supplied by whatever verticals are installed, not typed
+here, and a second vertical widens it on the day it is registered. That is the
+last section below.
+
+STILL OUT OF REACH, and narrower than before: a domain's PROPER nouns -- a
+protocol, a component, a part number -- and its corpus statistics. Nothing
+structural separates those from any other capitalised word, and this file does
+not pretend otherwise.
 """
 
 from __future__ import annotations
@@ -285,3 +302,123 @@ class TestTheProseThatShipsIsRead:
                  for m in re.findall(r"`[a-z0-9]+(?:-[a-z0-9]+)+`", sample)}
         assert named and not named <= allowed, (
             "the predicate cannot see a distribution name it should refuse")
+
+# --------------------------------------------------------------------------
+# The domain's own noun, in the prose that ships as documentation.
+# --------------------------------------------------------------------------
+
+def _installed_vertical_nouns() -> set:
+    """Every word an installed vertical calls the thing it audits.
+
+    DERIVED, and this is the whole point: the set is supplied by the verticals
+    themselves, through the member `vocabulary.Vocabulary` documents as *what
+    this domain calls one of the things audited*. Nothing is typed here, so a
+    second vertical widens the check the day it is registered, and neither
+    vertical's author has to remember this file exists.
+
+    `noun` and not `kinds` or `count_keys`, deliberately: those carry ordinary
+    words a neutral package legitimately uses -- one shipped vertical declares
+    a kind meaning *unrecognised* -- and refusing those would refuse plain
+    English. `noun` is the one member defined as the domain's own word.
+    """
+    from presence_audit import plugins, vocabulary
+
+    words = set()
+    # `_entry_points` rather than a second copy of it: the two-argument form of
+    # `entry_points()` moved between interpreter versions, and this file has no
+    # business owning a second answer to that question.
+    for entry in plugins._entry_points():
+        try:
+            entry.load()()
+        except Exception:                       # a broken vertical is not this
+            continue                            # file's subject
+        supplied = vocabulary.noun()
+        if supplied != vocabulary.DEFAULT_NOUN:
+            words |= {w.lower() for w in supplied}
+        vocabulary.reset()
+    return words
+
+
+def _prose_lines():
+    """Every docstring line and comment in the shipped modules, with its home.
+
+    Docstrings and comments only. Identifiers are a different surface with a
+    different remedy -- renaming a public field is a break for a consumer, and
+    a local variable is invisible to a reader of the documentation -- so this
+    quantifies over the prose and says so rather than over everything.
+    """
+    import io
+    import tokenize
+
+    out = []
+    for path in MODULES:
+        text = path.read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(text)):
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                                 ast.AsyncFunctionDef)):
+                doc = ast.get_docstring(node, clean=False)
+                if doc:
+                    out += [(path.name, line) for line in doc.splitlines()]
+        with io.StringIO(text) as handle:
+            for token in tokenize.generate_tokens(handle.readline):
+                if token.type == tokenize.COMMENT:
+                    out.append((path.name, token.string))
+    return out
+
+
+#: A quoted span is exempt, and the reason is recorded rather than assumed: the
+#: report and the supplemental file are PUBLISHED formats whose keys two
+#: distributions already read. Renaming one is a format-version change with a
+#: reading window, not a prose edit -- so documentation that shows a key must be
+#: able to spell it, or the documentation is wrong about the artifact.
+_QUOTED = re.compile(r"""("[^"]*"|'[^']*')""")
+
+
+def _unquoted(line: str) -> str:
+    return _QUOTED.sub(" ", line)
+
+
+class TestTheShippedProseNamesNoDomainsOwnNoun:
+    """The claim this file opens with, asked of the documentation as well as
+    the import graph."""
+
+    def test_the_predicate_can_produce_a_positive(self):
+        """Before believing a negative, prove the probe can produce one. This
+        runs the real predicate over the sentence that was in `feeder.py`, the
+        one instance an outside reviewer found by reading."""
+        was = "whether the BMC answered. Conflating it with sensors are missing"
+        assert re.search(r"\bsensors\b", _unquoted(was), re.I), (
+            "the predicate cannot see the sentence it was written for")
+
+    def test_a_quoted_key_is_exempt_and_a_bare_word_is_not(self):
+        """The carve-out has to be narrow enough to still catch prose."""
+        assert not re.search(r"\bsensors\b", _unquoted('{"sensors": ["A"]}'), re.I)
+        assert re.search(r"\bsensors\b", _unquoted("two sensors measure one thing"), re.I)
+
+    def test_there_is_prose_to_read(self):
+        """NON-VACUITY for the check below. `_prose_lines` parses every module
+        and could return nothing if the walk broke, which would be a pass."""
+        assert len(_prose_lines()) > 200, (
+            f"only {len(_prose_lines())} prose line(s) found across {len(MODULES)} "
+            f"modules; the check below would quantify over almost nothing")
+
+    def test_no_shipped_prose_uses_an_installed_verticals_noun(self):
+        """Whichever verticals this environment has.
+
+        Deliberately not a skip. A clean clone installs none, so the word set
+        is empty here and this passes over nothing -- which the two controls
+        above are what make honest. `checks.yml` installs one and asserts the
+        set was not empty, because that is the environment where it can.
+        """
+        words = _installed_vertical_nouns()
+        if not words:
+            return
+        pattern = re.compile(r"\b(%s)\b" % "|".join(sorted(words)), re.I)
+        offenders = [f"{name}: {line.strip()[:60]}"
+                     for name, line in _prose_lines()
+                     if pattern.search(_unquoted(line))]
+        assert offenders == [], (
+            f"{offenders} name a word an installed vertical declares as its "
+            f"own. A core that explains itself in one domain's noun is not "
+            f"neutral -- it has a favourite, and every other vertical reads "
+            f"documentation written about somebody else")

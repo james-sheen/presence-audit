@@ -1,30 +1,31 @@
-"""Compare two walks of the same machine: what did the firmware change?
+"""Compare two captures of the same system: what changed between them?
 
-`compare` in this package answers *does the machine match its declaration*. This
+`compare` in this package answers *does the system match its declaration*. This
 answers a different question, and the difference is the whole reason the module
-exists: **which sensors did this firmware update remove, rename, or re-threshold?**
+exists: **which declared points did this change remove, rename, or re-threshold?**
 
 Those two are not the same check, and running the first one twice does not
-produce the second. A firmware that renames `FAN0` to `Fan 0` still matches the
-declaration under the normalised matcher, so a config diff reports nothing while
-every dashboard, alert rule and trend query keyed on the old string goes quiet. A
-firmware that widens a threshold both walks agree on is invisible for the same
-reason. The comparison has to be walk against walk, with the declaration out of it.
+produce the second. A change that renames a point to a differently spelled form
+of the same name still matches the declaration under the normalised matcher, so a
+declaration diff reports nothing while every dashboard, alert rule and query keyed
+on the old string goes quiet. A change that widens a threshold both captures agree
+on is invisible for the same reason. The comparison has to be capture against
+capture, with the declaration out of it.
 
 **Identity is layered, and the layering is what makes a rename derivable.** A
-sensor is paired to its counterpart by NAME first -- the string every downstream
-consumer keys on -- and whatever is left is paired by Redfish URI *with the units
-and resource type agreeing*, because some firmware numbers sensors positionally
-and inserting one shifts every URI after it. A pair that matched that way with two
-different names is a rename, stated as one. A sensor whose name and URI both
+point is paired to its counterpart by NAME first -- the string every downstream
+consumer keys on -- and whatever is left is paired by ADDRESS *with the units and
+resource type agreeing*, because some sources number points positionally and
+inserting one shifts every address after it. A pair that matched that way with two
+different names is a rename, stated as one. A point whose name and address both
 changed is reported as one removal and one addition, and the report says so rather
 than guessing which addition replaced which removal: there is no evidence in two
 walks that would settle it, and a wrong guess reads exactly like a right one.
 
-**An incomplete walk withholds absence, on both sides.** The rule `compare` applies
-to one walk applies here twice over. A partial *after* walk renders as a firmware
-that deleted a chassis full of sensors, which is the most alarming possible way to
-report a network timeout.
+**An incomplete capture withholds absence, on both sides.** The rule `compare`
+applies to one capture applies here twice over. A partial *after* capture renders
+as a change that deleted a whole subtree of points, which is the most alarming
+possible way to report a network timeout.
 
 **An aggregation prefix is DECLARED, never inferred.** A BMC that aggregates a
 satellite controller prefixes the resources it republishes, and a prefix that
@@ -52,7 +53,7 @@ __all__ = ["Change", "RegressionReport", "compare_walks", "parse_prefix_map",
 
 # What counts as *worse*, and therefore fails a firmware gate. The split is not
 # about how surprising a change is: it is about whether something that worked
-# before stops working now. A sensor appearing is news; a sensor vanishing, going
+# before stops working now. A point appearing is news; a point vanishing, going
 # quiet, changing the name it is keyed under, changing its units, or losing a
 # threshold is a downstream consumer breaking.
 REGRESSION_KINDS = frozenset({
@@ -190,7 +191,7 @@ def _pair(before: Capture, after: Capture,
     #
     # **The NAME is rewritten and the URI is not.** The name is the string every
     # dashboard, alert rule and trend query keys on, so it is the field whose change
-    # reads as remove-plus-add. Rewriting the URI as well would pair sensors whose
+    # reads as remove-plus-add. Rewriting the address as well would pair points whose
     # names had also changed -- and a name change on top of a prefix change is
     # exactly the case the existing rule refuses to guess at.
     if prefix_map:
@@ -214,17 +215,17 @@ def _pair(before: Capture, after: Capture,
     # Redfish has to a stable identifier for a resource.
     #
     # **A URI on its own is not enough, and this was measured rather than
-    # reasoned.** Some implementations number sensors positionally --
-    # `/Sensors/s0`, `/Sensors/s1` -- so INSERTING one sensor shifts every URI
-    # after it. The first cut of this pass paired on URI alone and reported two
-    # confident renames on a firmware that had renamed nothing: it had added a
-    # sensor at the front, and every position moved up one.
+    # reasoned.** Some sources number points positionally -- an address ending in
+    # a running index -- so INSERTING one point shifts every address after it. The
+    # first cut of this pass paired on address alone and reported two confident
+    # renames against a capture that had renamed nothing: a point had been added at
+    # the front, and every position moved up one.
     #
     # So the URI must be corroborated by something the rename would not have
-    # changed. Units and resource type are what a walk carries: a fan is still
-    # reported in RPM after it is renamed, while the sensor that merely inherited
-    # its position is usually measuring something else entirely. A firmware that
-    # renames a sensor AND changes its units in one release is reported as a
+    # changed. Units and resource type are what a capture carries: a point still
+    # reports the same units after it is renamed, while the point that merely
+    # inherited its position is usually measuring something else entirely. A change
+    # that renames a point AND changes its units at once is reported as a
     # removal and an addition, which is the honest answer -- there is no longer
     # any evidence tying the two together.
     for path, old in before_paths.items():
@@ -278,7 +279,7 @@ def _undeclared_prefix_shift(gone: Sequence[CapturedPoint],
 
     **Only when the whole unpaired set shifts together.** Partitioning a mixed set
     of removals into subtrees is the guess this refuses to make, so a genuinely
-    removed sensor sitting alongside a shifted subtree suppresses the report. That
+    removed point sitting alongside a shifted subtree suppresses the report. That
     is a miss rather than a wrong answer, and it is the right way round.
     """
     if len(gone) < 2 or len(arrived) < 2:

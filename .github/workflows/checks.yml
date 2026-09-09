@@ -156,6 +156,27 @@ jobs:
               "registration check read nothing and its silence means nothing")
           print("  registration was checked against:", ", ".join(installed))
 
+          # The same question for the other check that reads what is installed.
+          # `test_it_names_no_domain` refuses any word an installed vertical
+          # declares as its own noun, and derives that set from the verticals
+          # rather than from a list -- so with none installed it quantifies over
+          # nothing and passes. This is the job that installs one.
+          from presence_audit import plugins, vocabulary
+          nouns = set()
+          for entry in plugins._entry_points():
+              try:
+                  entry.load()()
+              except Exception:
+                  continue
+              supplied = vocabulary.noun()
+              if supplied != vocabulary.DEFAULT_NOUN:
+                  nouns |= set(supplied)
+              vocabulary.reset()
+          assert nouns, (
+              "no installed vertical declares a noun, so the domain-prose check "
+              "in the suite ran over an empty word set and proved nothing")
+          print("  domain prose was checked against:", ", ".join(sorted(nouns)))
+
           for name in on_the_index:
               slug = re.sub(r"[-_.]+", "-", name).lower()
               url = f"https://pypi.org/simple/{slug}/"

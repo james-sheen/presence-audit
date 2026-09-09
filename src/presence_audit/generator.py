@@ -1,25 +1,25 @@
 """Turn a declaration into an `arbiter-engine` domain model, and say what it left out.
 
-Stage 2 asks the engine a question Stage 1 cannot: *is this sensor still alive?* The
+Stage 2 asks the engine a question Stage 1 cannot: *is this point still alive?* The
 engine answers against a domain model, and nobody is going to hand-write one for a
-platform that declares thousands of sensors. This generates it.
+declaration carrying thousands of points. This generates it.
 
 **The output is a pair, and the second half is not optional.** A model, and a manifest
 recording every declaration that did not become part of it and why. A generator that
 silently drops what it cannot express produces a model that looks complete and audits
 less than the reader believes — which is the same defect as a coverage tool that counts
-PID loops as sensors, one layer along.
+things that were never going to read, one layer along.
 
 Four things this has to get right, each because the obvious version is wrong:
 
-**One entity type per sensor.** Thresholds live on entity *types* in the engine, and
-every BMC sensor has its own values. The per-entity override path exists and is not
-wired into BOUNDEDNESS, so it cannot be used — measured, see
-`docs/stage2/s1-threshold-granularity.md`, and **re-measured against 0.1.7**, which is
+**One entity type per point.** Thresholds live on entity *types* in the engine, and
+every declared point has its own values. The per-entity override path exists and is not
+wired into BOUNDEDNESS, so it cannot be used — measured, and **re-measured against
+0.1.7**, which is
 where an expansion plan expected this to have changed. It has not: the engine's own
 `axiom_thresholds` module lists BOUNDEDNESS under `OVERRIDE_DECLARED_BUT_UNREACHABLE`
-and states that an override never touches a *declared* threshold at all. Type-per-sensor
-costs about 3 seconds at a thousand sensors, so the explosion is affordable; it just has
+and states that an override never touches a *declared* threshold at all. A type per
+point costs about 3 seconds at a thousand of them, so the explosion is affordable; it has
 to be recorded, because the type name is sanitised and every finding will name the
 sanitised form.
 
@@ -29,7 +29,7 @@ reading against negated thresholds, and the report layer un-inverted the text on
 out. Engine 0.1.7 takes `lower_warning:` and `lower_critical:` directly and says
 *is below critical threshold* itself, so the whole mechanism — the mirrored indicator,
 the mirrored observations, the translation — is deleted rather than kept working. One
-indicator per sensor now carries both bound pairs, and a sensor declaring both gets a
+indicator per point now carries both bound pairs, and a point declaring both gets a
 band.
 
 > **If you got here by grepping for `neg`, this is the answer: it is gone.** Every
@@ -44,14 +44,15 @@ band.
 > asserts that no CODE uses it, docstrings excluded, which is the claim that
 > actually matters.
 
-**Levels beyond warning and critical are recorded, not folded.** entity-manager
-declares `hard_shutdown` and `non_recoverable` as well; the engine has two slots.
-Folding a non-recoverable bound into `critical` would move the alarm point to a
-different number and call it the same thing. They go in the manifest as unmapped.
+**Levels beyond warning and critical are recorded, not folded.** A declaration format
+may carry more severity levels than the engine has slots for. Folding the outermost one
+into `critical` would move the alarm point to a different number and call it the same
+thing. They go in the manifest as unmapped.
 
-**Only sensors are generated.** Non-sensor `Type`s and templated names are excluded
-before generation, not filtered afterwards. A `$bus`-name fed to the engine becomes an
-entity type nothing can ever match, and the engine has no way to tell you that.
+**Only auditable points are generated.** Types the vertical does not audit, and
+templated names, are excluded before generation rather than filtered afterwards. A
+`$bus`-style name fed to the engine becomes an entity type nothing can ever match, and
+the engine has no way to tell you that.
 """
 
 from __future__ import annotations
@@ -100,14 +101,14 @@ _UNSAFE = re.compile(r"[^0-9A-Za-z]+")
 # Prefix for a peer's reading carried on another entity, so a redundancy check has
 # both numbers in one place. Distinct from `reading` so an unread peer property shows
 # up as itself in the engine's unconsumed-observation report rather than colliding
-# with the sensor's own value.
+# with the point's own value.
 PEER_PREFIX = "peer_"
 
 
 def peer_property(declared_name: str) -> str:
     """The property key a peer's reading is fed under.
 
-    Sanitised the same way an entity type is, and for the same reason: sensor names
+    Sanitised the same way an entity type is, and for the same reason: point names
     carry characters a property key should not, and the manifest keeps the mapping
     back to the name on the board.
     """
@@ -118,7 +119,7 @@ def peer_property(declared_name: str) -> str:
 def _entity_type(name: str, taken: set[str]) -> str:
     """A sanitised, unique entity-type name.
 
-    Lossy on purpose — the engine's type names are identifiers and sensor names are
+    Lossy on purpose — the engine's type names are identifiers and point names are
     not. The manifest carries the original, because every finding will name this form
     and a reader needs to get back to the thing it names.
     """
@@ -188,8 +189,8 @@ class Manifest:
         **The full path is deliberately not emitted.** A manifest is an artifact
         somebody commits, and the declaration's `source` is an absolute path on the
         machine that generated it, a path under somebody's home directory. The name
-        answers the question a reader actually has (which configuration declared this
-        sensor); the directory above it only identifies the person who ran the tool.
+        answers the question a reader actually has (which declaration source this
+        point came from); the directory above it only identifies who ran the tool.
 
         Found by running this project's own hygiene rules over generated output, which
         is the whole reason that check exists: a new artifact is a new way for identity
@@ -224,13 +225,13 @@ class Manifest:
         return None
 
     def translate_finding(self, finding: dict) -> str:
-        """Render an engine finding in the sensor's own terms.
+        """Render an engine finding in the point's own terms.
 
         The engine's wording is now correct about the world as well as the model —
-        a stopped fan produces *reading is below critical threshold*, not the
-        negated-indicator sentence this method used to have to un-invert. What is
+        a point that has stopped produces *reading is below critical threshold*, not
+        the negated-indicator sentence this method used to have to un-invert. What is
         still wrong for a reader is the SUBJECT: every finding names the sanitised
-        entity type, and the operator knows the sensor by the name on the board.
+        entity type, and the reader knows the point by its declared name.
 
         The indicator is the tail of `problem_type` and the bound is its head, both
         parsed rather than assumed. An unrecognised head is reported with the
@@ -252,11 +253,11 @@ class Manifest:
             # Not a bound breach -- a frozen series, a redundant disagreement, or
             # whatever the engine grows next. Its own wording is good and
             # self-explaining; the only thing wrong with it is that it names the
-            # indicator rather than the sensor.
+            # indicator rather than the point.
             text = reason.replace(indicator, "the reading", 1)
             # A redundancy finding also names the PEER, and it names it as the
             # sanitised property key the feeder invented. Left alone, the one finding
-            # whose whole value is *these two disagree* would name one sensor an
+            # whose whole value is *these two disagree* would name one point an
             # operator recognises and one string that appears nowhere on the board.
             for peer in sensor.agrees_with:
                 text = text.replace(peer_property(peer), peer)
@@ -276,7 +277,7 @@ class Manifest:
     def type_for_entity(self, entity_id: str) -> str | None:
         """The entity type a feeder registered this entity under.
 
-        The feeder names entities after the sensor, so the type is recoverable; this
+        The feeder names entities after the point, so the type is recoverable; this
         exists so the lookup has one home when the feeder lands in Phase 2.
         """
         for sensor in self.sensors:
@@ -287,7 +288,7 @@ class Manifest:
     def describe_indicator(self, entity_type: str, indicator: str) -> str:
         """Translate an engine indicator back into what a person measured.
 
-        One indicator per sensor since native bounds landed, so this is a lookup
+        One indicator per point since native bounds landed, so this is a lookup
         rather than the un-negation it used to be. It stays because the engine names
         the sanitised entity type and an operator knows the name on the board.
         """
@@ -319,7 +320,7 @@ def _indicator(upper: tuple[float | None, float | None],
                expect_variation: bool) -> dict:
     """One indicator carrying whichever bound pairs the configuration declared.
 
-    A sensor declaring only a ceiling gets `warning`/`critical`; one declaring only
+    A point declaring only a ceiling gets `warning`/`critical`; one declaring only
     a floor gets `lower_warning`/`lower_critical`; one declaring both gets a band.
     A key is emitted only when the configuration gave a number for it — writing
     `lower_warning: null` would be this generator inventing a specification the
@@ -442,7 +443,7 @@ def generate(declaration: DeclarationSource, *, domain_id: str,
             # threshold on either side declines `no_threshold` every pass, which is a
             # decline about the model rather than about the board -- so the axiom is
             # not asked. STABILITY stays: a flow reading that has frozen is still a
-            # dead sensor.
+            # dead point.
             indicator["axioms"] = [a for a in indicator["axioms"]
                                    if a != "BOUNDEDNESS"]
 

@@ -3,12 +3,12 @@
 The generator built the model. This supplies the readings and decides what the answer
 means for CI.
 
-**Stage 1 owns presence; only present-and-reading sensors are fed.** That is the
+**Stage 1 owns presence; only present-and-reading points are fed.** That is the
 layering rule, and it is a blast-radius choice rather than a workaround: absence is a
 question Stage 1 already answers precisely, with a three-valued verdict the engine has
-no equivalent for. Feeding an absent sensor would ask the engine to re-derive something
+no equivalent for. Feeding an absent point would ask the engine to re-derive something
 weaker. The engine's own `missing_property` decline stays valuable as the belt to that
-brace — if it ever fires, Stage 1 said a sensor was reading and its value did not reach
+brace — if it ever fires, Stage 1 said a point was reading and its value did not reach
 the model, which is a mapping bug and fails the gate.
 
 **A single walk is one sample, and stuck-at needs about ten.** So liveness warms up:
@@ -97,7 +97,7 @@ _NOT_APPLICABLE_REASONS = frozenset({"not_applicable", "undefined_for_values"})
 # axiom and supplies no number for it to compare against.
 #
 # WHY THIS IS NOT A MODEL DEFECT, EVEN THOUGH THIS PACKAGE WRITES THE MODEL.
-# The generator already withholds BOUNDEDNESS from a sensor whose BMC declares no
+# The generator already withholds BOUNDEDNESS from a point whose declaration carries no
 # thresholds, precisely so the engine is never asked a question nobody set. It
 # cannot do the same for MONOTONICITY: declaring the axiom gets the reversal arm
 # AND the rate arm, and there is no way to declare one without the other. So a
@@ -130,7 +130,7 @@ _NO_THRESHOLD_REASONS = frozenset({"no_threshold"})
 # defect and must fail: nothing else will notice it.
 #
 # Kept out of `_CORE_CASE_REASONS` deliberately -- that set is subject to the
-# expected-peer exemption below, which is a statement about a sensor that is not
+# expected-peer exemption below, which is a statement about a point that is not
 # reading. A model defect has no peer to be excused by.
 _MODEL_DEFECT_REASONS = frozenset({"missing_role"})
 
@@ -164,7 +164,7 @@ class FeedResult:
 
     @property
     def warming_up(self) -> dict[str, int]:
-        """Sensors with too little history for stuck-at detection, and how much
+        """Points with too little history for stuck-at detection, and how much
         they have. Surfaced so a report can say *liveness: warming up, 4/10* rather
         than implying it checked."""
         return {name: n for name, n in self.samples.items()
@@ -188,9 +188,10 @@ class DetectOutcome:
         """0 clean, 1 something got worse, 2 could not complete.
 
         `2` is never returned from here: it belongs to the caller, which knows
-        whether the BMC answered and whether the model loaded. Conflating *could
-        not evaluate* with *sensors are missing* would fail a good firmware image,
-        and it only has to happen once before nobody trusts the gate.
+        whether the capture source answered and whether the model loaded.
+        Conflating *could not evaluate* with *declared points are missing* would
+        fail a healthy system, and it only has to happen once before nobody trusts
+        the gate.
         """
         if self.findings or self.core_case_declines or self.unmapped:
             return 1
@@ -224,7 +225,7 @@ def feed(session: Any, manifest: Manifest,
     # Current readings by declared name, so a redundant peer's value can be attached
     # to the entity that declares the agreement. Built from the same `is_reading`
     # test the feed loop applies, rather than from `history`, which carries readings
-    # from walks where the sensor may since have stopped.
+    # from walks where the point may since have stopped.
     readings = {m.declared.display_name: float(m.live.reading)
                 for m in current.matches
                 if m.live.is_reading and m.live.reading is not None}
@@ -233,7 +234,7 @@ def feed(session: Any, manifest: Manifest,
         entity_type = manifest.type_for(name)
         if entity_type is None:
             # Declared, matched, and deliberately not modelled -- a templated name,
-            # a non-sensor Type, or no thresholds to bound against. Counted so the
+            # a type the vertical does not audit, or no thresholds to bound against. Counted so the
             # difference between "not checked" and "not modelled" stays visible.
             result.skipped_not_modelled += 1
             continue
@@ -348,7 +349,7 @@ def _is_expected_peer_decline(decline: dict, feed_result: Any) -> bool:
     Classified on `(axiom, reason)` AND cross-checked against what the feeder
     actually did, so a CONSISTENCY `missing_property` for a peer that WAS fed still
     fails the gate -- that one really is a mapping bug. Bucketing on `reason` alone
-    failed the gate twice for one absent sensor, the second time asserting the name
+    failed the gate twice for one absent point, the second time asserting the name
     mapping was wrong when it was not.
     """
     if decline.get("axiom") != "CONSISTENCY":
@@ -379,7 +380,7 @@ def evaluate(envelope: dict, describe: dict, manifest: Manifest, *,
             # gate twice for one fact and say the mapping was wrong, which it is not.
             outcome.data_declines.append(rendered)
         elif reason in _CORE_CASE_REASONS:
-            # Stage 1 said this sensor was reading. If its value did not reach the
+            # Stage 1 said this point was reading. If its value did not reach the
             # model, the mapping is wrong, and a mapping error is invisible unless
             # something fails on it.
             outcome.core_case_declines.append(rendered)

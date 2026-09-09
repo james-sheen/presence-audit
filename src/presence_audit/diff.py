@@ -1,8 +1,8 @@
 """Compare what is declared against what is reported. This is the product.
 
 Every other module exists to feed this one. The comparison answers a question no
-monitoring stack asks, because none of them read the declaration: **which sensors
-should be here and are not?**
+tool watching live values asks, because none of them read the declaration:
+**which declared points should be here and are not?**
 
 Three design commitments, each of which costs code and each of which exists
 because the cheap version produces a confidently wrong report:
@@ -12,18 +12,18 @@ exactly, or after normalisation, or -- for the roughly one name in eight that
 carries a runtime template like `$bus` -- through a pattern derived from that
 template. Every match records *how* it was made, so a fuzzy match is visible in
 the output rather than indistinguishable from an exact one. A tool that silently
-fuzzy-matches will eventually pair two unrelated sensors and report a clean
-board.
+fuzzy-matches will eventually pair two unrelated points and report a clean
+capture.
 
-**An incomplete walk is not an empty machine.** If any fetch failed, absence
+**An incomplete capture is not an empty one.** If any fetch failed, absence
 findings are withheld entirely rather than reported against a partial picture.
-A transport failure that renders as `47 sensors missing` is worse than no report,
-because someone will act on it.
+A transport failure that renders as a page of missing points is worse than no
+report, because someone will act on it.
 
 **Presence is three-valued, not two.** Present and reading, present but disabled
-or unreadable, and entirely absent are three different hardware conditions with
-three different responses. Collapsing the middle one into either neighbour loses
-the case this tool was built for -- the disabled sensor that no UI displays.
+or unreadable, and entirely absent are three different conditions with three
+different responses. Collapsing the middle one into either neighbour loses the
+case this tool was built for -- the disabled point that nothing displays.
 """
 
 from __future__ import annotations
@@ -128,9 +128,10 @@ def normalise_name(name: str) -> str:
     """The matcher's notion of one name being the same name as another.
 
     Public because precedence between declaration sources has to use exactly this
-    function. Two sources declaring `HGX_TEMP0` and `HGX TEMP0` are declaring one
-    sensor, and a merge that kept both would expect it twice and report one of them
-    permanently absent -- a false regression created by the merge itself.
+    function. Two sources declaring one name with a separator the other spells
+    differently are declaring one point, and a merge that kept both would expect it
+    twice and report one of them permanently absent -- a false regression created
+    by the merge itself.
     """
     return _SEPARATORS.sub("_", name.strip().lower())
 
@@ -151,7 +152,7 @@ def _pair(declaration: Iterable[DeclaredPoint], walk: Capture) -> tuple[list[Mat
     unmatched: list[DeclaredPoint] = []
 
     # Exact, then normalised, then template -- most confident first, so a
-    # template pattern can never steal a sensor an exact name would have claimed.
+    # template pattern can never steal a point an exact name would have claimed.
     pending: list[DeclaredPoint] = []
     for declared in declaration:
         live = exact.get(declared.name)
@@ -188,11 +189,11 @@ def _pair(declaration: Iterable[DeclaredPoint], walk: Capture) -> tuple[list[Mat
 
 
 def _compare_thresholds(match: Match, findings: list[Finding]) -> None:
-    """Does the live sensor carry the thresholds the config declared?
+    """Does the live point carry the thresholds the declaration asked for?
 
-    Drift here is its own finding: a firmware update that keeps a sensor and
-    quietly widens its limits is invisible to presence checking and to ordinary
-    alerting, because nothing ever breaches a threshold that moved.
+    Drift here is its own finding: an update that keeps a point and quietly widens
+    its limits is invisible to presence checking and to ordinary alerting, because
+    nothing ever breaches a threshold that moved.
     """
     declared, live = match.declared, match.live
     for threshold in declared.thresholds:
@@ -221,19 +222,21 @@ def _close(a: float, b: float, *, rel: float = 1e-6) -> bool:
 def expects_reading(sensor: DeclaredPoint) -> bool:
     """Whether absence of this declaration should count as a regression.
 
-    **The `Type` filter is a fact about entity-manager, not about declarations in
-    general.** It exists because entity-manager declares PID loops, EEPROMs, muxes
-    and GPIO presence detectors exactly like sensors, so a Type this build cannot
-    place is reported and never asserted about.
+    **The type filter is a fact about ONE declaration format, not about
+    declarations in general.** Some formats declare things that never produce a
+    reading -- controls, fittings, identifiers -- in exactly the same shape as the
+    points that do, so a type this build cannot place is reported and never
+    asserted about. The vertical is what knows which is which.
 
     A declaration source that only ever records things that were READING carries no
     such population, and applying the filter to one is not caution -- it is a silent
-    hole. Every entry would classify `UNRECOGNISED` for want of an entity-manager
-    Type, so a sensor that stopped reporting would be counted, printed, and never
-    once fail a gate. That is the exact vacuous pass this tool exists to catch.
+    hole. Every entry would classify `UNRECOGNISED` for want of a type the format
+    does not carry, so a point that stopped reporting would be counted, printed, and
+    never once fail a gate. That is the exact vacuous pass this tool exists to
+    catch.
 
     So the source says. `expects_reading is None` means decide from `type`, which is
-    the entity-manager case and the default.
+    the case for a format that carries one, and the default.
     """
     if sensor.expects_reading is not None:
         return sensor.expects_reading
@@ -260,27 +263,28 @@ def compare(declaration: DeclarationSource, walk: Capture, *,
             include_disabled_in_config: bool = False) -> DiffReport:
     """Diff a declaration against a walk.
 
-    `include_disabled_in_config` controls whether sensors the config itself marks
-    `Status: disabled` are expected to be present. They are excluded by default:
-    94 entries in the upstream corpus carry that marker, and reporting each as
-    missing on a healthy board is precisely the every-run-red noise that teaches
-    people to stop reading the report.
+    `include_disabled_in_config` controls whether points the declaration itself
+    marks disabled are expected to be present. They are excluded by default:
+    reporting a deliberately disabled point as missing on a healthy capture is
+    precisely the every-run-red noise that teaches people to stop reading the
+    report. How many carry that marker is a fact about one corpus, and it lives
+    with the vertical that measured it.
     """
     report = DiffReport(walk_complete=walk.complete,
                         declaration_sources=list(declaration.sources))
     findings: list[Finding] = []
 
-    # EVERY declared sensor is paired, including the ones the config marks
+    # EVERY declared point is paired, including the ones the declaration marks
     # disabled. Excluding them from pairing was the first cut and it was wrong in
-    # a way only a run against real data showed: a board whose config disables
-    # four fan connectors that the machine nonetheless reports produced four
-    # `undeclared_present` rows on a completely healthy walk. Noise on every run
-    # is how a report teaches its reader to stop opening it.
+    # a way only a run against real data showed: a declaration that disables
+    # several points the capture nonetheless reports produced an
+    # `undeclared_present` row for each, on a completely healthy capture. Noise on
+    # every run is how a report teaches its reader to stop opening it.
     #
-    # So they are matched, and only their EXPECTATIONS differ: a config-disabled
-    # sensor that is absent is not a finding, and one that is live is a finding
-    # of its own -- the configuration and the machine disagree about whether that
-    # hardware is switched on.
+    # So they are matched, and only their EXPECTATIONS differ: a disabled point
+    # that is absent is not a finding, and one that is live is a finding of its
+    # own -- the declaration and the capture disagree about whether that thing is
+    # switched on.
     # `.points` on both, never iteration of the object itself. The protocol is
     # the whole contract a second bridge gets: anything this module needs that
     # the protocol does not declare is a requirement nobody outside can discover.
@@ -292,12 +296,13 @@ def compare(declaration: DeclarationSource, walk: Capture, *,
     if not include_disabled_in_config:
         unmatched_declared = [s for s in unmatched_declared if not s.disabled]
 
-    # The same move again, for a bigger population and a worse symptom. An
-    # `Exposes` entry is not necessarily a sensor: PID loops, stepwise fan curves,
-    # EEPROMs, firmware blobs, muxes and GPIO presence detectors are declared the
-    # same way and can never appear in a Redfish Sensors collection. Expecting them
-    # made 1,467 of 8,684 upstream declarations permanently absent, which is a red
-    # gate on a healthy board -- and on three boards in four.
+    # The same move again, for a bigger population and a worse symptom. A
+    # declaration entry is not necessarily a point that reads: a format may declare
+    # controls, fittings and identifiers the same way, and none of them can ever
+    # appear in a capture of live values. Expecting them made a sixth of one real
+    # corpus permanently absent, which is a red gate on a healthy capture -- and on
+    # most of them. The corpus and its numbers belong to the vertical that has
+    # them; what belongs here is that the source is ASKED rather than assumed.
     #
     # Three-valued, because a closed split would force a Type this build has never
     # seen into whichever bucket the default happens to be. An unrecognised type is

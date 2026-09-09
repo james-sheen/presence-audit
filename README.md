@@ -120,6 +120,26 @@ distribution in the family whose empty dependency list is asserted by
 with the verticals because they are what construct a session, and they are
 therefore the only ones who can say which engine releases they need.
 
+## The published names do not move
+
+Two kinds of name in this package's output are deliberately not free to change,
+and both look like wording.
+
+**The three states.** *Reading*, *present but not reading* and *absent* are keys
+in a published format that two distributions already read, and the set of format
+ids this package accepts is pinned at exactly two so a third cannot appear
+without somebody saying why. Renaming a state reads like a lexical improvement
+and is a wire-contract break.
+
+**The keys that still carry another domain's word.** Some keys in the report and
+in the supplemental file are named after the domain this package was extracted
+from. That is a real leak and it is written down here rather than quietly
+repaired. The prose around them has been rewritten in this package's own noun,
+and a test refuses any new instance by deriving the forbidden words from whatever
+verticals are installed — but a KEY is read by name, by code somebody else
+released. Changing one is a format-version change with a window in which both
+spellings are accepted, not an edit made on the way past.
+
 ## Status
 
 Extracted from `bmc-sensor-audit`, which keeps its Redfish capture layer, its
