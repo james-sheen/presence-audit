@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from typing import Mapping, Optional, Protocol, Sequence
 
+from .protocols import PROTOCOL_VERSION
+
 
 class PluginError(RuntimeError):
     """A vertical was named and could not be loaded, or registered nothing."""
@@ -155,7 +157,25 @@ _REGISTERED: Optional[Vocabulary] = None
 
 
 def register(vocabulary: Vocabulary) -> None:
-    """Supply the vocabulary. Called by a vertical, never by the core."""
+    """Supply the vocabulary. Called by a vertical, never by the core.
+
+    A vertical MAY declare `protocol_version`, the revision of the contract it
+    was written against. Declaring it is optional and absence is admitted --
+    the two verticals published before the constant existed declare nothing,
+    and refusing them would make the guarantee itself a breaking change. What
+    is refused is a vertical that declares a revision this core does not serve,
+    because that vertical is telling you it expects something else and the
+    failure it is heading for is a wrong answer rather than an error.
+    """
+    if hasattr(vocabulary, "protocol_version"):
+        declared = vocabulary.protocol_version
+        if declared != PROTOCOL_VERSION:
+            raise PluginError(
+                f"the vocabulary was written against protocol version "
+                f"{declared!r} and this core serves {PROTOCOL_VERSION}. Both "
+                f"numbers are named because either one can be the one that "
+                f"moved, and running anyway would answer domain questions "
+                f"against a contract neither side agreed to")
     if not vocabulary.kinds:
         raise PluginError(
             "the vocabulary offered no kinds; a classifier with an empty range "

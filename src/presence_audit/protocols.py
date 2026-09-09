@@ -31,6 +31,25 @@ from __future__ import annotations
 
 from typing import Iterable, Mapping, Optional, Protocol, Sequence, Tuple
 
+#: The revision of the contract a vertical is written against -- the members in
+#: this module and in `vocabulary.Vocabulary`, taken together.
+#:
+#: **It moves only when a conforming vertical would stop working**, which is a
+#: narrower rule than it sounds and this package has already exercised it three
+#: times without moving. `noun`, `count_labels` and `report_sections` all
+#: arrived after two verticals were published, and all three are OPTIONAL for
+#: exactly that reason: a vertical that answers nothing to them keeps working,
+#: so the contract did not move. An added member is not a revision. A removed
+#: one, a renamed one, or an existing answer that starts meaning something else
+#: is.
+#:
+#: **Declaring it is optional, and stays optional.** Two verticals were
+#: published before this existed and neither declares it; requiring it would
+#: make registering a version a breaking change, which is the trap the optional
+#: members above were shaped to avoid. A vertical that says nothing is admitted;
+#: one that says something is held to it.
+PROTOCOL_VERSION = 1
+
 
 class CapturedPoint(Protocol):
     """One named thing that was looked at, and what it read."""

@@ -35,6 +35,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from presence_audit import PROTOCOL_VERSION
 from presence_audit import protocols as P
 from presence_audit import vocabulary as V
 from presence_audit.diff import compare
@@ -101,6 +102,10 @@ class _DS:                                   # the declaration
 
 
 class FactoryLineVocabulary:
+    # Declared, so registering this stand-in RUNS the version check rather than
+    # taking the absent path around it. A conformance fixture that skips the
+    # gate it is meant to demonstrate proves the gate exists and nothing else.
+    protocol_version = PROTOCOL_VERSION
     kinds = property(lambda s: KINDS)
     count_keys = property(lambda s: {"not_a_point": "not_a_point"})
     def classify(s, t): return "point" if t in ("speed", "distance") else "unrecognised"
@@ -175,6 +180,28 @@ class TestTheCoreServesADomainItWasNotWrittenFor:
         three are audited. A core that counted four would be judging a point the
         domain set aside."""
         assert foreign_report.counts()["declared"] == 3
+
+    def test_this_domain_declares_the_revision_it_was_written_against(self):
+        """NON-VACUITY for the check below, and for the module-scope
+        registration this whole file runs on: an undeclared version takes the
+        absent path, which is admitted, so the gate would never run here."""
+        assert hasattr(FactoryLineVocabulary, "protocol_version"), (
+            "the foreign vocabulary declares no protocol version, so "
+            "registering it exercises none of the version check")
+        assert FactoryLineVocabulary.protocol_version == PROTOCOL_VERSION
+
+    def test_the_same_domain_declaring_another_revision_is_refused(self):
+        """The gate, run against the vocabulary this file already registers.
+        A refusal proved on a throwaway object proves it about the object;
+        this proves it about the one the rest of the file depends on."""
+        wrong = FactoryLineVocabulary()
+        wrong.protocol_version = PROTOCOL_VERSION + 1
+        try:
+            with pytest.raises(V.PluginError):
+                V.register(wrong)
+        finally:
+            V.reset()
+            V.register(FactoryLineVocabulary())
 
     def test_the_adapter_offers_ONLY_protocol_members(self):
         """The load-bearing assertion.

@@ -34,7 +34,7 @@ not auditing.
 
 A **sketch, not a runnable block** — the complete member list is
 `vocabulary.Vocabulary`, which documents each one and what an empty answer
-means. Thirteen members; most domains answer several of them with *nothing*.
+means. Fifteen members; most domains answer several of them with *nothing*.
 
 ```
 class MyVocabulary:
@@ -54,6 +54,24 @@ def register():
 Name `register` on the `presence_audit.plugins` entry point and a plain
 `pip install` finds it. Then `diff.compare(declaration, capture)` answers in
 three states, counting your kinds under your own keys.
+
+A vertical may also declare which revision of that contract it was written
+against:
+
+```
+from presence_audit import PROTOCOL_VERSION
+
+class MyVocabulary:
+    protocol_version = PROTOCOL_VERSION
+```
+
+Saying nothing is admitted — verticals were published before the number
+existed, and refusing them would make the guarantee itself a breaking change.
+Saying the wrong thing is refused at registration, naming both numbers. The
+value moves only when a vertical that conforms today would stop working, which
+has not happened yet: `noun`, `count_labels` and `report_sections` all arrived
+after two verticals shipped, and all three are optional so that none of them
+had to move it.
 
 Two installed verticals are refused, not ranked, as above. Choose one with the
 environment variable or your own command line.

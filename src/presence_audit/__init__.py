@@ -22,7 +22,8 @@ protocol is wrong -- not the vertical.
 # restated: a second literal here would be a second record of one fact, and the
 # whole point of the constant is that there is one.
 from .feeder import ENVELOPE_SCHEMA_VERSION
+from .protocols import PROTOCOL_VERSION
 
-__all__ = ["ENVELOPE_SCHEMA_VERSION"]
+__all__ = ["ENVELOPE_SCHEMA_VERSION", "PROTOCOL_VERSION"]
 
 __version__ = "0.1.2"

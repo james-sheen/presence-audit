@@ -55,19 +55,27 @@ class TestTheConstantHasOneHome:
     the day somebody types the number instead of importing it, and both would
     read correct in isolation."""
 
-    def test_it_is_importable_from_the_package_root(self):
-        assert hasattr(presence_audit, "ENVELOPE_SCHEMA_VERSION"), (
+    def test_the_root_exports_this_one(self):
+        assert "ENVELOPE_SCHEMA_VERSION" in presence_audit.__all__, (
             "the constant is the contract a vertical author has to know about, "
             "and it is not reachable without knowing which module holds it")
 
-    def test_the_root_imports_it_rather_than_restating_it(self):
-        """The structural half. Comparing the two values would pass just as
+    def test_there_are_exports_to_check(self):
+        """NON-VACUITY for the parametrised check below: an empty `__all__`
+        would collect zero cases and report as a pass."""
+        assert presence_audit.__all__, "the package root exports nothing"
+
+    @pytest.mark.parametrize("name", presence_audit.__all__)
+    def test_every_exported_name_is_imported_rather_than_restated(self, name):
+        """The structural half, over EVERY export rather than the one this
+        file is about -- the next constant re-exported here inherits the check
+        instead of needing its own. Comparing values would pass just as
         happily on a literal that happens to agree today."""
-        binds = _how_the_root_binds("ENVELOPE_SCHEMA_VERSION")
+        binds = _how_the_root_binds(name)
         assert binds == {"import"}, (
-            f"the package root binds ENVELOPE_SCHEMA_VERSION by {binds or 'nothing'}. "
-            f"A literal here is a second record of one fact, and the two agree "
-            f"until the first time only one of them is edited")
+            f"the package root binds {name} by {binds or 'nothing'}. A literal "
+            f"here is a second record of one fact, and the two agree until the "
+            f"first time only one of them is edited")
 
     def test_that_check_can_produce_a_positive(self):
         """Before believing a negative, prove the probe can produce one: the
