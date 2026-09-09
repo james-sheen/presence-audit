@@ -26,4 +26,4 @@ from .protocols import PROTOCOL_VERSION
 
 __all__ = ["ENVELOPE_SCHEMA_VERSION", "PROTOCOL_VERSION"]
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
