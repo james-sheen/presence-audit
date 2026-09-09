@@ -103,6 +103,73 @@ jobs:
           print("  wheel NOTICE names this distribution")
           PY
 
+      - name: Every vertical the README names resolves on the index
+        # The one claim here that no assertion from a tree can reach. The Known
+        # verticals section points a reader OUT of this distribution, and
+        # whether a name in it was ever published is a fact about the index.
+        # The suite checks the group, the variable and the registration; this
+        # checks existence, in the only job that has a network.
+        #
+        # Kept out of `tests/` deliberately. A network test would skip on a
+        # clean clone, and the step above turns a skip into a failure -- so it
+        # would either red this repository on somebody else's outage or teach
+        # the suite to tolerate skips, and the second is the expensive one.
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import importlib.metadata as md
+          import pathlib, re, urllib.error, urllib.request
+
+          README = pathlib.Path("README.md").read_text(encoding="utf-8")
+          section = re.search(r"^## Known verticals\n(.*?)(?=^## |\Z)",
+                              README, re.S | re.M)
+          assert section, "the README has no Known verticals section"
+          linked = re.findall(r"\[`([a-z0-9]+(?:-[a-z0-9]+)+)`\]\((https://[^)\s]+)\)",
+                              section.group(1))
+          assert linked, "the Known verticals section names no distribution"
+          named = [name for name, _ in linked]
+
+          # Only the rows that CLAIM the index are asked about it. A row linked
+          # to a repository is saying the opposite, and `factory-line-audit` is
+          # exactly that -- a real vertical, never uploaded. Requiring every
+          # name to resolve would make the honest row the failing one.
+          on_the_index = [name for name, url in linked if "pypi.org" in url]
+          assert on_the_index, (
+              "no row claims the index, so the resolution check below would "
+              "pass over nothing")
+
+          # NON-VACUITY, asserted where it can be. The suite's registration
+          # check iterates whatever verticals this environment has installed,
+          # and a clean clone has none -- so it passes over an empty set there
+          # by design. This is the job that installs one, so this is where the
+          # set can be required to be non-empty. If the bridge ever stops being
+          # a name in that section, the check goes quietly vacuous everywhere.
+          installed = []
+          for name in named:
+              try:
+                  md.distribution(name)
+              except md.PackageNotFoundError:
+                  continue
+              installed.append(name)
+          assert installed, (
+              "this job installs no vertical the README names, so the suite's "
+              "registration check read nothing and its silence means nothing")
+          print("  registration was checked against:", ", ".join(installed))
+
+          for name in on_the_index:
+              slug = re.sub(r"[-_.]+", "-", name).lower()
+              url = f"https://pypi.org/simple/{slug}/"
+              try:
+                  with urllib.request.urlopen(url, timeout=30) as answer:
+                      code = answer.status
+              except urllib.error.HTTPError as refused:
+                  code = refused.code
+              assert code == 200, (
+                  f"the README sends a reader to {name}, and {url} answers "
+                  f"{code}. Either it was never published or it was removed")
+              print(f"  {name} resolves on the index")
+          PY
+
       - name: Hygiene sweep
         # The same check the hook runs, over the whole tree rather than the
         # staged diff. This is the backstop for every commit made from a clone

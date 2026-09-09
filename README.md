@@ -55,9 +55,25 @@ Name `register` on the `presence_audit.plugins` entry point and a plain
 `pip install` finds it. Then `diff.compare(declaration, capture)` answers in
 three states, counting your kinds under your own keys.
 
-**Two installed verticals are refused, not ranked** — both would register, the
-later would win, and every verdict would come from a domain you were not
-auditing. Choose one with the environment variable or your own command line.
+Two installed verticals are refused, not ranked, as above. Choose one with the
+environment variable or your own command line.
+
+## Known verticals
+
+Each of these registers on `presence_audit.plugins`. Where a link goes says
+where the thing is:
+
+| distribution | the domain it supplies | where it is |
+|---|---|---|
+| [`bmc-sensor-audit`](https://pypi.org/project/bmc-sensor-audit/) | server BMC sensors, read over Redfish | on the index: `pip install bmc-sensor-audit` |
+| [`factory-line-audit`](https://github.com/james-sheen/factory-line-audit) | a discrete-manufacturing line, read over OPC UA | source only, not on the index: install the repository with its `vertical` extra |
+
+The extra on `factory-line-audit` is not a detail: that package runs a whole
+stage without this one, and only its vertical leg needs a core to register with.
+
+Install exactly one of them beside this package. None of them is a dependency of
+this one and none ever will be — the arrow points the other way, which is what
+lets the next vertical arrive without any of these knowing.
 
 ## Status
 
