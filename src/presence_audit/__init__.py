@@ -17,4 +17,12 @@ against. If something here needs a member the protocol does not declare, the
 protocol is wrong -- not the vertical.
 """
 
+# The one contract this package holds with an engine, re-exported so a reader
+# can see it without knowing which module it lives in. Imported rather than
+# restated: a second literal here would be a second record of one fact, and the
+# whole point of the constant is that there is one.
+from .feeder import ENVELOPE_SCHEMA_VERSION
+
+__all__ = ["ENVELOPE_SCHEMA_VERSION"]
+
 __version__ = "0.1.2"

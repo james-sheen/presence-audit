@@ -75,6 +75,33 @@ Install exactly one of them beside this package. None of them is a dependency of
 this one and none ever will be — the arrow points the other way, which is what
 lets the next vertical arrive without any of these knowing.
 
+## The engine contract
+
+`feed()` takes a session and reads an envelope back. What this package is
+coupled to is that envelope's **wire shape**, not the engine's package version,
+and the shape carries a number:
+
+```
+from presence_audit import ENVELOPE_SCHEMA_VERSION
+```
+
+`feeder.schema_mismatch()` answers in three states, and the third is the one
+worth knowing about. A version this build parses is accepted; a version it does
+not is refused, naming both; an **absent** version is accepted, because engines
+before the field existed shipped this same shape without stamping it, and
+reading a missing key as *unsupported* rather than *empty* is the same mistake
+as reading *absent* for *not reading*. A vertical whose own pin excludes those
+engines is free to be stricter, and one is.
+
+**There is no `arbiter-engine` dependency here, and there will not be one.**
+Nothing in this package imports the engine: `feed(session, ...)` takes whatever
+the caller built, and the envelope comes back as a plain dict. Declaring the
+engine would declare a dependency this package does not have, on the one
+distribution in the family whose empty dependency list is asserted by
+`tests/test_it_names_no_domain.py` rather than promised in prose. The pin lives
+with the verticals because they are what construct a session, and they are
+therefore the only ones who can say which engine releases they need.
+
 ## Status
 
 Extracted from `bmc-sensor-audit`, which keeps its Redfish capture layer, its
