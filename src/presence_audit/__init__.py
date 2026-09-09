@@ -24,6 +24,12 @@ protocol is wrong -- not the vertical.
 from .feeder import ENVELOPE_SCHEMA_VERSION
 from .protocols import PROTOCOL_VERSION
 
+# `exit_contract.compose` is deliberately NOT re-exported here. The two names
+# above are constants a reader has to be able to find without knowing which
+# module holds them; a function with a module named after the contract it
+# implements is already findable, and re-exporting it under a second name --
+# `compose` means nothing at the package root, so it would have needed one --
+# creates exactly the two-records-of-one-fact problem the constants avoid.
 __all__ = ["ENVELOPE_SCHEMA_VERSION", "PROTOCOL_VERSION"]
 
 __version__ = "0.1.6"

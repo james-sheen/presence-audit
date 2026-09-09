@@ -76,6 +76,29 @@ had to move it.
 Two installed verticals are refused, not ranked, as above. Choose one with the
 environment variable or your own command line.
 
+## The exit contract
+
+`0` clean, `1` something got worse, `2` could not complete. Two audits of
+different domains are comparable only if they mean the same thing by those
+numbers, so the rule for combining them lives here:
+
+```
+from presence_audit.exit_contract import compose
+compose(stage_one, stage_two, strict_floor)
+```
+
+The worst leg wins, `2` outranks `1`, a value outside the three reads as `2`
+with the raw value kept beside it, and **composing nothing is `2`** — a battery
+whose legs all failed to be collected has not come out clean. That last case is
+why this is a function and not `max()`.
+
+**The floors are not here and will not be.** Which finding class or decline
+reason floors at which code depends on what the axiom means where you are and
+how often it fires on a healthy population. A package that cannot see a domain
+cannot make that call, and a shared default would be decided once by whoever
+wrote the first vertical and inherited by everyone after. Verticals keep their
+own floor tables and share this.
+
 ## Two domains in one process
 
 The vocabulary used to be resolved from process-global state, so *which domain
