@@ -422,3 +422,111 @@ class TestTheShippedProseNamesNoDomainsOwnNoun:
             f"own. A core that explains itself in one domain's noun is not "
             f"neutral -- it has a favourite, and every other vertical reads "
             f"documentation written about somebody else")
+
+class TestTheRuntimeDocstringsAreOnlyTheFieldNames:
+    """The surface the source check cannot see, found by reading the wheel.
+
+    `@dataclass` SYNTHESISES `__doc__` from the field signature when a class
+    has none, so four classes here answer `help()` with a line that spells a
+    field called after one domain. The source-prose check above reads source
+    and is right to say there is no such docstring; this reads what the class
+    actually carries at runtime, and there is one.
+
+    That is the identifier leak showing up as documentation. It is NOT fixed by
+    rewording anything: the words are the public field names, and renaming a
+    field a consumer reads is a break, which is why this package still carries
+    them and says so in its README rather than quietly changing them.
+
+    So what is asserted is the part that can be true today: every runtime
+    occurrence is ATTRIBUTABLE TO A FIELD NAME. A real docstring written on one
+    of these classes, naming a domain in prose, is not attributable and fails --
+    and when the fields are eventually renamed, this check needs no edit, it
+    simply stops having anything to attribute.
+    """
+
+    def _classes(self):
+        import importlib
+        out = []
+        for path in MODULES:
+            module = importlib.import_module(f"presence_audit.{path.stem}")
+            for name in dir(module):
+                obj = getattr(module, name)
+                if (isinstance(obj, type)
+                        and getattr(obj, "__module__", "") == module.__name__):
+                    out.append((path.name, name, obj))
+        return out
+
+    def test_there_are_classes_to_read(self):
+        """NON-VACUITY: the import-and-scan could return nothing and pass."""
+        assert len(self._classes()) >= 5, (
+            f"only {len(self._classes())} class(es) found across the package")
+
+    @staticmethod
+    def _is_synthesised(obj) -> bool:
+        """Whether this docstring is the one `@dataclass` builds, not a written
+        one. The synthesised form is the class name followed by the field
+        signature, and nothing hand-written opens that way.
+
+        **The first version of this class asked a different question** -- it
+        excused any word that MATCHED A FIELD NAME. That excuses the prose as
+        well as the signature: a written docstring saying *one point the
+        comparison found* would have passed on a class with a field of that
+        name, which is every class this check is about. Its negative control
+        did fire, but on the easy case -- a written docstring naming something
+        no field is called -- so the hole it left was invisible.
+
+        The distinction that matters is not which words appear. It is whether
+        a human wrote them.
+        """
+        import dataclasses
+
+        doc = obj.__doc__ or ""
+        return dataclasses.is_dataclass(obj) and doc.startswith(f"{obj.__name__}(")
+
+    def test_every_runtime_mention_is_synthesised_and_not_written(self):
+        words = _installed_vertical_nouns()
+        if not words:
+            return
+        pattern = re.compile(r"\b(%s)\b" % "|".join(sorted(words)), re.I)
+        offenders = []
+        for where, name, obj in self._classes():
+            doc = obj.__doc__
+            if not doc or not pattern.search(_unquoted(doc)):
+                continue
+            if self._is_synthesised(obj):
+                continue                    # the field names, and they stay
+            offenders.append(f"{where}:{name}: {doc.splitlines()[0][:60]}")
+        assert offenders == [], (
+            f"{offenders} name a domain's own noun in a docstring somebody "
+            f"WROTE. The synthesised field signature is exempt because a field "
+            f"is a published name; prose is not, and has no such excuse")
+
+    def test_that_check_can_produce_a_positive(self):
+        """A written docstring naming the noun must be refused even when a
+        field of that very name would have excused it. This is the exact case
+        the first version of this check waved through."""
+        import dataclasses
+
+        @dataclasses.dataclass
+        class Fake:
+            """One sensor the comparison had something to say about."""
+            sensor: str = ""
+
+        assert not self._is_synthesised(Fake), (
+            "a hand-written docstring is being read as the synthesised one, so "
+            "the check exempts exactly what it exists to catch")
+        assert re.search(r"\bsensor\b", _unquoted(Fake.__doc__), re.I)
+
+    def test_the_exemption_still_recognises_the_real_thing(self):
+        """And the other direction: if the synthesised form stops being
+        recognised, every dataclass here becomes an offender and the check
+        goes red for a reason that is not a defect."""
+        import dataclasses
+
+        @dataclasses.dataclass
+        class Real:
+            sensor: str = ""
+
+        assert self._is_synthesised(Real), (
+            f"the synthesised docstring {Real.__doc__!r} is not recognised as "
+            f"one, so the exemption no longer matches what Python produces")
