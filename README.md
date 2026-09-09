@@ -76,6 +76,31 @@ had to move it.
 Two installed verticals are refused, not ranked, as above. Choose one with the
 environment variable or your own command line.
 
+## Two domains in one process
+
+The vocabulary used to be resolved from process-global state, so *which domain
+is this* was a property of the interpreter rather than of the call. Every public
+entry point now takes one for the call instead:
+
+```
+compare(declaration, capture, vocabulary=mine)
+```
+
+Omit it and the registered vocabulary is used, exactly as before — nothing that
+worked has stopped. Pass one and **nothing is registered**, which is what lets a
+harness run two verticals in one process, including in two threads at once: the
+lookup is context-local, not module-level.
+
+The report carries the vocabulary it was built with, because a report is read
+after the call that made it returns, and its counts ask the domain what its
+kinds are called.
+
+**Finished migrating?** Set `PRESENCE_AUDIT_REQUIRE_EXPLICIT_VOCABULARY=1` and
+the registry stops being a fallback, so your suite goes red on whatever still
+depends on it. That is the only way to find those calls. It is off by default
+and stays off: published verticals register and pass nothing, and a default that
+broke them would make this a removal rather than an addition.
+
 ## Checking a vertical
 
 The kit that proves this core serves a domain it was not written for ships with

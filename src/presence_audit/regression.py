@@ -339,7 +339,19 @@ def _close(a: float, b: float, *, rel: float = 1e-6) -> bool:
 
 
 def compare_walks(before: Capture, after: Capture, *,
-                  prefix_map: Sequence[tuple[str, str]] = ()) -> RegressionReport:
+                  prefix_map: Sequence[tuple[str, str]] = (),
+                  vocabulary=None) -> RegressionReport:
+    """Diff two captures of one system, oldest first.
+
+    `vocabulary` supplies the domain for this call only; omit it and the
+    registered one is used. See `vocabulary.using`.
+    """
+    with _vocabulary.using(vocabulary):
+        return _compare_walks(before, after, prefix_map=prefix_map)
+
+
+def _compare_walks(before: Capture, after: Capture, *,
+                   prefix_map: Sequence[tuple[str, str]] = ()) -> RegressionReport:
     """Diff two walks of one machine, oldest first.
 
     `prefix_map` is the operator's declared aggregation-prefix map, `(old, new)`

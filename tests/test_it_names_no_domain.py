@@ -150,12 +150,19 @@ def test_no_module_puts_a_vocabulary_INTO_the_registry_AT_IMPORT():
     **NARROWED TO IMPORT SCOPE**, and the narrowing is the claim rather than a
     concession. What the docstring above describes is invisibility: a consumer
     who imports gets a domain without asking. A call inside a function body is
-    not that -- somebody has to call it -- and `conformance.py` has one, because
-    running the kit means registering the reference vocabulary and putting back
-    whatever was there. The wider predicate refused that on the strength of a
-    reason that did not apply to it. The behavioural half of this claim -- that
-    the kit really does put back what it found -- cannot be read from an AST and
-    is asserted in `test_the_conformance_kit.py`.
+    not that -- somebody has to call it.
+
+    The one call in this package is in `conformance.main`, the command line,
+    and it is a RESTORE: running a vertical's own `register()` mutates the
+    registry, so the kit puts back what was there before it started. Which is
+    where a registry belongs -- resolution for a human choosing at a command
+    line, not for a library deciding on their behalf. The library path itself
+    now reaches the registry through nothing at all when a caller passes
+    `vocabulary=`, and `test_two_domains_in_one_process.py` runs it with the
+    fallback turned off to prove that.
+
+    The behavioural half -- that the kit really does put back what it found --
+    cannot be read from an AST and is asserted in `test_the_conformance_kit.py`.
     """
     offenders = []
     for path in MODULES:

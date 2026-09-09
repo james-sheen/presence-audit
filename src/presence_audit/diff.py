@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Iterable
+from typing import Any, Iterable
 
 from .protocols import DeclarationSource, DeclaredPoint
 from . import vocabulary as _vocabulary
@@ -90,6 +90,18 @@ class DiffReport:
     # reading, keyed by kind. Reported, never silently dropped -- an exclusion
     # nobody can see is indistinguishable from a checker that forgot to look.
     not_sensor_kinds: dict[str, list] = field(default_factory=dict)
+    #: The vocabulary this report was BUILT with, when the caller supplied one.
+    #:
+    #: A report is read after the call that made it returns, and `counts()`
+    #: asks the vocabulary what its kinds are called. Without this the argument
+    #: to `compare()` would build a report nobody could read: the comparison
+    #: would use the domain you passed and the counts would come from whatever
+    #: happened to be registered, or raise if nothing was. Found by writing the
+    #: two-domain test, not by reasoning about it.
+    #:
+    #: `None` means the caller supplied nothing, and `using(None)` is a no-op,
+    #: so a report built the old way still reads the registry exactly as before.
+    vocabulary: Any = None
     # DeclarationSource sources other than entity-manager that this report was judged
     # against. Carried ON THE REPORT rather than passed to each renderer, so a new
     # output format cannot be added without the provenance coming with it. A reader
@@ -107,6 +119,10 @@ class DiffReport:
         return 1 if self.regressions else 0
 
     def counts(self) -> dict[str, int]:
+        with _vocabulary.using(self.vocabulary):
+            return self._counts()
+
+    def _counts(self) -> dict[str, int]:
         reading = sum(1 for m in self.matches if m.live.is_reading)
         return {
             "declared": len(self.matches) + len(self.unmatched_declared),
@@ -260,7 +276,8 @@ def _classify_excluded(declared: list) -> dict:
 
 
 def compare(declaration: DeclarationSource, walk: Capture, *,
-            include_disabled_in_config: bool = False) -> DiffReport:
+            include_disabled_in_config: bool = False,
+            vocabulary=None) -> DiffReport:
     """Diff a declaration against a walk.
 
     `include_disabled_in_config` controls whether points the declaration itself
@@ -269,9 +286,23 @@ def compare(declaration: DeclarationSource, walk: Capture, *,
     precisely the every-run-red noise that teaches people to stop reading the
     report. How many carry that marker is a fact about one corpus, and it lives
     with the vertical that measured it.
+
+    `vocabulary` supplies the domain for THIS CALL only. Omit it and the
+    registered one is used, exactly as before. Pass one and nothing is
+    registered, which is what lets two domains run in one process -- and in
+    two threads at once, because the lookup is context-local rather than
+    module-level.
     """
+    with _vocabulary.using(vocabulary):
+        return _compare(declaration, walk,
+                        include_disabled_in_config=include_disabled_in_config)
+
+
+def _compare(declaration: DeclarationSource, walk: Capture, *,
+             include_disabled_in_config: bool = False) -> DiffReport:
     report = DiffReport(walk_complete=walk.complete,
-                        declaration_sources=list(declaration.sources))
+                        declaration_sources=list(declaration.sources),
+                        vocabulary=_vocabulary._ACTIVE.get())
     findings: list[Finding] = []
 
     # EVERY declared point is paired, including the ones the declaration marks

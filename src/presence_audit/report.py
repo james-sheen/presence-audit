@@ -97,7 +97,17 @@ def headlines(singular: str | None = None) -> dict:
 
 
 def as_json(report: DiffReport, *, target: str | None = None,
-            walk: Capture | None = None) -> str:
+            walk: Capture | None = None, vocabulary=None) -> str:
+    """The JSON report.
+    `vocabulary` supplies the domain for this call only; omit it and the registered
+    one is used. See `vocabulary.using`.
+    """
+    with _vocabulary.using(vocabulary):
+        return _as_json(report, target=target, walk=walk)
+
+
+def _as_json(report: DiffReport, *, target: str | None = None,
+             walk: Capture | None = None) -> str:
     payload: dict[str, Any] = {
         "target": target,
         "walk_complete": report.walk_complete,
@@ -182,7 +192,17 @@ _CORE_COUNTS = (
 _CORE_COUNT_KEYS = tuple(key for _, key, _ in _CORE_COUNTS) + ("findings", "regressions")
 
 
-def as_text(report: DiffReport, *, target: str | None = None) -> str:
+def as_text(report: DiffReport, *, target: str | None = None,
+            vocabulary=None) -> str:
+    """The human report.
+    `vocabulary` supplies the domain for this call only; omit it and the registered
+    one is used. See `vocabulary.using`.
+    """
+    with _vocabulary.using(vocabulary):
+        return _as_text(report, target=target)
+
+
+def _as_text(report: DiffReport, *, target: str | None = None) -> str:
     singular, _plural = _vocabulary.noun()
     kind_headlines = headlines(singular)
     counts = report.counts()
@@ -312,7 +332,17 @@ def _ordered_changes(report: RegressionReport) -> list:
                   key=lambda c: (rank.get(c.kind, len(CHANGE_ORDER)), c.sensor))
 
 
-def regression_as_json(report: RegressionReport, *, before: str, after: str) -> str:
+def regression_as_json(report: RegressionReport, *, before: str, after: str,
+                       vocabulary=None) -> str:
+    """The JSON regression report.
+    `vocabulary` supplies the domain for this call only; omit it and the registered
+    one is used. See `vocabulary.using`.
+    """
+    with _vocabulary.using(vocabulary):
+        return _regression_as_json(report, before=before, after=after)
+
+
+def _regression_as_json(report: RegressionReport, *, before: str, after: str) -> str:
     payload: dict[str, Any] = {
         "before": before, "after": after,
         "walks_complete": report.complete,
@@ -334,7 +364,17 @@ def regression_as_json(report: RegressionReport, *, before: str, after: str) -> 
     return json.dumps(payload, indent=2, sort_keys=False)
 
 
-def regression_as_text(report: RegressionReport, *, before: str, after: str) -> str:
+def regression_as_text(report: RegressionReport, *, before: str, after: str,
+                       vocabulary=None) -> str:
+    """The human regression report.
+    `vocabulary` supplies the domain for this call only; omit it and the registered
+    one is used. See `vocabulary.using`.
+    """
+    with _vocabulary.using(vocabulary):
+        return _regression_as_text(report, before=before, after=after)
+
+
+def _regression_as_text(report: RegressionReport, *, before: str, after: str) -> str:
     lines: list[str] = []
     singular, plural = _vocabulary.noun()
     titles = change_headlines(singular)

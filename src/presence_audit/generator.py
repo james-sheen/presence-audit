@@ -348,7 +348,22 @@ def _indicator(upper: tuple[float | None, float | None],
 
 def generate(declaration: DeclarationSource, *, domain_id: str,
              expect_variation: bool = True,
-             supplemental: "Supplemental | None" = None) -> tuple[dict, Manifest]:
+             supplemental: "Supplemental | None" = None,
+             vocabulary=None) -> tuple[dict, Manifest]:
+    """Build a domain model and its manifest.
+
+    `vocabulary` supplies the domain for this call only; omit it and the
+    registered one is used. See `vocabulary.using`.
+    """
+    with _vocabulary.using(vocabulary):
+        return _generate(declaration, domain_id=domain_id,
+                         expect_variation=expect_variation,
+                         supplemental=supplemental)
+
+
+def _generate(declaration: DeclarationSource, *, domain_id: str,
+              expect_variation: bool = True,
+              supplemental: "Supplemental | None" = None) -> tuple[dict, Manifest]:
     """Build a domain model and its manifest.
 
     `expect_variation` turns on stuck-at detection, which is the Stage 2 mission and

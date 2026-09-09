@@ -92,6 +92,22 @@ class TestItPutsBackWhatItFound:
             "the kit left its reference vocabulary registered, so a caller who "
             "ran it is now auditing a factory line they never asked about")
 
+    def test_it_does_not_register_at_all_any_more(self, monkeypatch):
+        """Stronger than *puts back what it found*, and it is what changed.
+
+        The kit used to register and restore. Restoring correctly is a promise
+        that has to be kept on every path including the raising ones, and
+        `vocabulary=` removed the need to make it: the reference vocabulary is
+        passed to the call. This asserts the registry is never touched, which
+        *empty afterwards* cannot -- a register-then-restore passes that.
+        """
+        def refuse(_):
+            raise AssertionError("the kit called vocabulary.register")
+
+        monkeypatch.setattr(V, "register", refuse)
+        V.reset()
+        assert conformance.check_the_core() == []
+
     def test_a_registered_vocabulary_survives_a_run(self):
         mine = ExpectsItsOwnTypes()
         V.reset()

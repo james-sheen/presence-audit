@@ -193,48 +193,51 @@ THREE_STATES = ("reading", "present_not_reading", "declared_absent")
 # --------------------------------------------------------------------------
 
 def check_the_core() -> List[str]:
-    """Drive the core with protocol-only objects. Problems, or an empty list."""
-    problems: List[str] = []
-    previous = vocabulary._REGISTERED
-    vocabulary.reset()
-    try:
-        vocabulary.register(ReferenceVocabulary())
-        declaration = DeclarationSource(SAMPLE_DECLARATION)
-        capture = Capture(SAMPLE_CAPTURE)
-        try:
-            report = diff.compare(declaration, capture)
-        except AttributeError as reached:
-            return [f"compare() reached for a member the protocol does not "
-                    f"declare: {reached}"]
-        counts = report.counts()
-        if counts.get("declared", 0) <= 0:
-            problems.append("compare() found nothing to declare; the kit's own "
-                            "fixture cannot refute anything")
+    """Drive the core with protocol-only objects. Problems, or an empty list.
 
-        # MEMBERSHIP FIRST, then the value. Written the other way round, this
-        # read a key that does not exist, got the default, and reported *the
-        # absent state came back empty* -- which is a claim about the core and
-        # was really a claim about the spelling in this file. A missing key and
-        # an empty state are different facts and must not share a message.
-        missing = [key for key in THREE_STATES if key not in counts]
-        if missing:
-            problems.append(f"the report carries no {missing} key, so the "
-                            f"three-valued answer cannot be read at all")
-        empty = [key for key in THREE_STATES
-                 if key in counts and not counts[key]]
-        if empty:
-            problems.append(f"the three-valued answer did not discriminate: "
-                            f"{empty} came back empty, so a core that answered "
-                            f"the same way every time would pass")
-        try:
-            regression.compare_walks(capture, Capture(SAMPLE_CAPTURE))
-        except AttributeError as reached:
-            problems.append(f"compare_walks() reached for a member the protocol "
-                            f"does not declare: {reached}")
-    finally:
-        vocabulary.reset()
-        if previous is not None:
-            vocabulary.register(previous)
+    The reference vocabulary is PASSED, not registered. This used to register
+    it and put back whatever it displaced -- which worked, and was the one
+    thing this package promises not to do to anybody, and needed an exemption
+    in the structural check that forbids exactly that. `vocabulary=` removed
+    the need for the registration and for the exemption together.
+    """
+    problems: List[str] = []
+    reference = ReferenceVocabulary()
+    declaration = DeclarationSource(SAMPLE_DECLARATION)
+    capture = Capture(SAMPLE_CAPTURE)
+
+    try:
+        report = diff.compare(declaration, capture, vocabulary=reference)
+    except AttributeError as reached:
+        return [f"compare() reached for a member the protocol does not "
+                f"declare: {reached}"]
+
+    counts = report.counts()
+    if counts.get("declared", 0) <= 0:
+        problems.append("compare() found nothing to declare; the kit's own "
+                        "fixture cannot refute anything")
+
+    # MEMBERSHIP FIRST, then the value. Written the other way round, this read
+    # a key that does not exist, got the default, and reported *the absent
+    # state came back empty* -- a claim about the core that was really a claim
+    # about the spelling in this file. A missing key and an empty state are
+    # different facts and must not share a message.
+    missing = [key for key in THREE_STATES if key not in counts]
+    if missing:
+        problems.append(f"the report carries no {missing} key, so the "
+                        f"three-valued answer cannot be read at all")
+    empty = [key for key in THREE_STATES if key in counts and not counts[key]]
+    if empty:
+        problems.append(f"the three-valued answer did not discriminate: "
+                        f"{empty} came back empty, so a core that answered the "
+                        f"same way every time would pass")
+
+    try:
+        regression.compare_walks(capture, Capture(SAMPLE_CAPTURE),
+                                 vocabulary=reference)
+    except AttributeError as reached:
+        problems.append(f"compare_walks() reached for a member the protocol "
+                        f"does not declare: {reached}")
     return problems
 
 

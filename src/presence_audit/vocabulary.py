@@ -19,6 +19,9 @@ sign is a wrong answer in somebody's report.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
+import os
 from typing import Mapping, Optional, Protocol, Sequence
 
 from .protocols import PROTOCOL_VERSION
@@ -156,6 +159,92 @@ class Vocabulary(Protocol):
 
 _REGISTERED: Optional[Vocabulary] = None
 
+#: The vocabulary for the CURRENT CALL, when a caller supplied one explicitly.
+#:
+#: A `ContextVar` rather than a module global, and rather than a parameter
+#: threaded through every private helper. The registry is read from twenty-six
+#: places across six modules, most of them inside functions no caller names, so
+#: a parameter would have changed every internal signature to give the public
+#: entry points one keyword. What actually needed to change is the SCOPE of the
+#: ambient lookup: from the process to the call.
+#:
+#: The consequence is the property the design could not have before. Two
+#: vocabularies can run in one process at the same time, in different threads or
+#: different tasks, each seeing its own -- because a context is per-thread and
+#: per-task, and this variable is looked up in it rather than in the module.
+_ACTIVE: contextvars.ContextVar = contextvars.ContextVar(
+    "presence_audit_vocabulary", default=None)
+
+
+@contextlib.contextmanager
+def using(supplied: Optional[Vocabulary]):
+    """Make `supplied` the vocabulary for the duration of this block.
+
+    `None` is a no-op rather than an error, so a public entry point can pass
+    its optional `vocabulary=` argument straight through without branching --
+    and a caller who supplies nothing gets exactly the behaviour they had.
+
+    Nothing is registered. The registry is not touched, not read and not
+    restored, because it was never written: a caller who was relying on their
+    own registration still has it when this returns, including when the block
+    raises.
+    """
+    if supplied is None:
+        yield None
+        return
+    token = _ACTIVE.set(supplied)
+    try:
+        yield supplied
+    finally:
+        _ACTIVE.reset(token)
+
+
+#: The name of the flag that turns the registry fallback OFF.
+REQUIRE_EXPLICIT = "PRESENCE_AUDIT_REQUIRE_EXPLICIT_VOCABULARY"
+
+
+def _explicit_required() -> bool:
+    """Whether this process refuses the registry fallback.
+
+    **Read at call time, not at import.** An import-time read cannot be turned
+    on by a test without reloading the module, and a setting that is awkward to
+    exercise is one nobody exercises.
+
+    OFF by default and it stays off: two published verticals register and pass
+    nothing, and the whole point of `vocabulary=` was to add a way, not to
+    remove one. Turning it on is how a consumer proves they have finished
+    migrating -- their suite goes red on the calls that still rely on ambient
+    state, which is the only way to find them.
+    """
+    return os.environ.get(REQUIRE_EXPLICIT, "") not in ("", "0")
+
+
+@contextlib.contextmanager
+def requiring_explicit(required: bool = True):
+    """Turn the fallback off for a block. For a suite proving it has migrated."""
+    previous = os.environ.get(REQUIRE_EXPLICIT)
+    os.environ[REQUIRE_EXPLICIT] = "1" if required else "0"
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(REQUIRE_EXPLICIT, None)
+        else:
+            os.environ[REQUIRE_EXPLICIT] = previous
+
+
+def _supplied() -> Optional[Vocabulary]:
+    """The vocabulary in force: the call's, or the registry's, or none.
+
+    Every reader goes through this. Written once because the alternative is
+    four copies of the same precedence rule, and a precedence rule written four
+    times is one that will disagree with itself.
+    """
+    active = _ACTIVE.get()
+    if active is not None:
+        return active
+    return None if _explicit_required() else _REGISTERED
+
 
 def register(vocabulary: Vocabulary) -> None:
     """Supply the vocabulary. Called by a vertical, never by the core.
@@ -191,8 +280,9 @@ def register(vocabulary: Vocabulary) -> None:
 
 
 def current() -> Vocabulary:
-    """The registered vocabulary, or a refusal that says how to supply one."""
-    if _REGISTERED is None:
+    """The vocabulary in force, or a refusal that says how to supply one."""
+    supplied = _supplied()
+    if supplied is None:
         # Both names are READ from the module that defines them, never spelled
         # here. Spelled, this message named the variable this package used
         # before it was extracted -- a name that does nothing now -- in the one
@@ -208,8 +298,13 @@ def current() -> Vocabulary:
             f"no vertical has registered a vocabulary. One is supplied by an "
             f"entry point in the group '{ENTRY_POINT_GROUP}', by the "
             f"{ENVIRONMENT_VARIABLE} environment variable, or by --plugin. "
-            f"Running without one would classify nothing and report cleanly")
-    return _REGISTERED
+            f"Running without one would classify nothing and report cleanly. "
+            f"A caller who has one in hand can pass it as `vocabulary=` "
+            f"instead, and register nothing" +
+            (f". {REQUIRE_EXPLICIT} is set in this process, so a registered "
+             f"vocabulary would not have been used either -- the argument is "
+             f"the only way in" if _explicit_required() else ""))
+    return supplied
 
 
 #: The noun the core falls back to. It is the word this module's own protocol
@@ -225,7 +320,7 @@ def noun() -> tuple:
     before it existed answers nothing here and must keep working. A malformed
     answer falls back too -- a report is not the place to raise.
     """
-    supplied = getattr(_REGISTERED, "noun", None)
+    supplied = getattr(_supplied(), "noun", None)
     try:
         singular, plural = supplied
     except (TypeError, ValueError):
@@ -241,13 +336,13 @@ def count_keys() -> Mapping[str, str]:
     Defensive for the same reason as the others: the text report reads this and
     must not begin raising in a caller that renders without registering.
     """
-    supplied = getattr(_REGISTERED, "count_keys", None)
+    supplied = getattr(_supplied(), "count_keys", None)
     return supplied if isinstance(supplied, Mapping) else {}
 
 
 def count_labels() -> Mapping[str, tuple]:
     """Report key -> (label, note) for this domain's extra counts, or empty."""
-    supplied = getattr(_REGISTERED, "count_labels", None)
+    supplied = getattr(_supplied(), "count_labels", None)
     if supplied is None:
         return {}
     try:
@@ -270,8 +365,19 @@ def count_labels() -> Mapping[str, tuple]:
 
 
 def registered() -> bool:
-    """Whether anything has registered. For a caller deciding what to say."""
+    """Whether anything has registered.
+
+    The REGISTRY, deliberately, not `_supplied()`. A caller asking this is
+    deciding what to say about the process, and a vocabulary passed to one call
+    is not a registration -- answering `True` inside a `using` block would tell
+    them something that stops being true when the block ends.
+    """
     return _REGISTERED is not None
+
+
+def in_force() -> bool:
+    """Whether anything would answer right now, registered or supplied."""
+    return _supplied() is not None
 
 
 def reset() -> None:
