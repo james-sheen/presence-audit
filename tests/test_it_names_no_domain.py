@@ -110,31 +110,102 @@ def test_a_module_imports_only_itself_and_the_stdlib(path):
         f"dependency list is now a lie; if a vertical needs it, it belongs there")
 
 
-def test_no_module_puts_a_vocabulary_INTO_the_registry():
+def _registry_calls(path, at_import_time: bool):
+    """Calls to `vocabulary.register` in one module.
+
+    `at_import_time` picks module scope -- statements that run when the module
+    is imported -- from calls sitting inside a function body, which run only
+    when somebody asks for them.
+    """
+    tree = _tree(path)
+    if at_import_time:
+        scope = []
+        for node in tree.body:                    # module scope only
+            scope += list(ast.walk(node)) if not isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) else []
+    else:
+        scope = []
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                scope += list(ast.walk(node))
+    return [node.lineno for node in scope
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "register"
+            and isinstance(node.func.value, ast.Name)
+            and "vocabulary" in node.func.value.id]
+
+
+def test_no_module_puts_a_vocabulary_INTO_the_registry_AT_IMPORT():
     """Shipping a default vertical would make every consumer inherit a domain
-    they did not choose -- and it would be invisible, because registration is a
-    side effect of import.
+    they did not choose -- and it would be invisible, because registration
+    would be a side effect of import.
 
     The predicate is a call to the REGISTRY, resolved from the AST, not the text
     `register(`. The first version of this test looked for that text and flagged
     `plugins.py`, which calls a callable the CALLER supplied -- the loader doing
     its job. A check that fires on the mechanism instead of the act is the wrong
     question asked precisely.
+
+    **NARROWED TO IMPORT SCOPE**, and the narrowing is the claim rather than a
+    concession. What the docstring above describes is invisibility: a consumer
+    who imports gets a domain without asking. A call inside a function body is
+    not that -- somebody has to call it -- and `conformance.py` has one, because
+    running the kit means registering the reference vocabulary and putting back
+    whatever was there. The wider predicate refused that on the strength of a
+    reason that did not apply to it. The behavioural half of this claim -- that
+    the kit really does put back what it found -- cannot be read from an AST and
+    is asserted in `test_the_conformance_kit.py`.
     """
     offenders = []
     for path in MODULES:
         if path.name == "vocabulary.py":          # defines the registry
             continue
-        for node in ast.walk(_tree(path)):
-            if (isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Attribute)
-                    and node.func.attr == "register"
-                    and isinstance(node.func.value, ast.Name)
-                    and "vocabulary" in node.func.value.id):
-                offenders.append(f"{path.name}:{node.lineno}")
+        offenders += [f"{path.name}:{line}"
+                      for line in _registry_calls(path, at_import_time=True)]
     assert offenders == [], (
-        f"{offenders} put a vocabulary into the registry. This package ships no "
-        f"vertical -- a vocabulary arrives from outside or not at all")
+        f"{offenders} put a vocabulary into the registry as a side effect of "
+        f"import. This package ships no vertical -- a vocabulary arrives from "
+        f"outside, when somebody asks, or not at all")
+
+
+def test_that_narrowing_did_not_empty_the_check():
+    """NON-VACUITY of a different kind: the check above must still be able to
+    SEE a module-scope call, or narrowing it turned it off.
+
+    Written because the narrowing was made to accommodate a module this
+    session added. A predicate loosened to admit the thing in front of you is
+    the one most likely to admit everything.
+    """
+    import tempfile
+
+    def source(*written):
+        """Build a module body without an escape in sight. The first cut
+        put one inside a generated string and the newline landed in the
+        file rather than in its source -- a syntax error rather than a
+        subtle one, but the same class as every other escape trap."""
+        return "".join(line + chr(10) for line in written)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        offender = pathlib.Path(tmp) / "offender.py"
+        offender.write_text(source("from . import vocabulary",
+                                   "vocabulary.register(object())"),
+                            encoding="utf-8")
+        assert _registry_calls(offender, at_import_time=True), (
+            "the narrowed predicate cannot see a registration at module "
+            "scope, so it no longer checks anything")
+
+        inner = pathlib.Path(tmp) / "inner.py"
+        inner.write_text(source("from . import vocabulary",
+                                "def run():",
+                                "    vocabulary.register(object())"),
+                         encoding="utf-8")
+        assert not _registry_calls(inner, at_import_time=True), (
+            "the narrowed predicate still fires on a call inside a "
+            "function, so the narrowing did not take")
+        assert _registry_calls(inner, at_import_time=False), (
+            "the function-scope arm sees nothing, so nothing distinguishes "
+            "the two cases and the split is decoration")
 
 
 def test_the_declared_dependency_list_is_actually_empty():

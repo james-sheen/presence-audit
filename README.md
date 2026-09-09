@@ -76,6 +76,26 @@ had to move it.
 Two installed verticals are refused, not ranked, as above. Choose one with the
 environment variable or your own command line.
 
+## Checking a vertical
+
+The kit that proves this core serves a domain it was not written for ships with
+it, so you can point it at yours:
+
+```
+python -m presence_audit.conformance your_package.vertical:register
+```
+
+The spec is the same one `PRESENCE_AUDIT_PLUGINS` and `--plugin` take. It drives
+the core with stand-ins that implement the protocol and nothing else — no
+convenience a concrete type happens to have — and then hands your vocabulary the
+same objects.
+
+**It proves nothing reached past the contract. It cannot prove the contract is
+enough for you.** A stand-in is written *from* the protocol, so it can only find
+that something reached past the document, never that the document is missing
+something your domain needs. The second is the interesting failure and only a
+real domain finds it.
+
 ## Known verticals
 
 Each of these registers on `presence_audit.plugins`. Where a link goes says

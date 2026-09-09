@@ -41,100 +41,21 @@ from presence_audit import vocabulary as V
 from presence_audit.diff import compare
 from presence_audit.regression import compare_walks
 
-KINDS = ("point", "not_a_point", "unrecognised")
-
-
-class _P:                                    # a captured node
-    def __init__(s, node, entries): s._n, s._e = node, entries
-    name = property(lambda s: s._n)
-    path = property(lambda s: s._n)
-    @property
-    def reading(s):
-        good = [e.get("v") for e in s._e if e.get("q") == "good"]
-        return good[-1] if good else None
-    is_reading = property(lambda s: any(e.get("q") == "good" for e in s._e))
-    state = property(lambda s: s._e[-1].get("q") if s._e else None)
-    thresholds = property(lambda s: {})
-    units = property(lambda s: None)
-    is_enabled = property(lambda s: True)
-
-
-class _C:                                    # the capture
-    def __init__(s, walk):
-        idx, stamps = {}, []
-        for sample in walk.get("samples") or []:
-            stamps.append(sample.get("t"))
-            for node, r in (sample.get("nodes") or {}).items():
-                idx.setdefault(node, []).append(r)
-        s._i, s._t = idx, [x for x in stamps if x]
-    points = property(lambda s: [_P(n, e) for n, e in s._i.items()])
-    captured_at = property(lambda s: s._t[-1] if s._t else None)
-    complete = property(lambda s: bool(s._i))
-    errors = property(lambda s: ())
-    # No `__iter__`, no `__len__`. This class is exactly `protocols.Capture` and
-    # nothing else, because the protocol is the whole contract an outside domain
-    # is given. Adding a member here to make a call site work would move the
-    # requirement somewhere no reader of the protocol can find it.
-
-
-class _D:                                    # a declared tag
-    def __init__(s, asset, tag, spec): s._a, s._t, s._s = asset, tag, spec
-    name = property(lambda s: s._s["node"])
-    type = property(lambda s: s._s.get("class"))
-    display_name = property(lambda s: f"{s._a['id']}.{s._t}")
-    source = property(lambda s: "register.yaml")
-    expects_reading = property(lambda s: None)
-    disabled = property(lambda s: bool(s._s.get("excluded")))
-    thresholds = property(lambda s: ())
-    is_templated = property(lambda s: False)
-
-
-class _DS:                                   # the declaration
-    def __init__(s, reg): s._r = reg
-    @property
-    def points(s):
-        return [_D(a, t, sp) for a in s._r.get("assets") or []
-                for t, sp in (a.get("tags") or {}).items()]
-    sources = property(lambda s: ("register.yaml",))
-    anomalies = property(lambda s: ())
-    unreadable = property(lambda s: ())
-    # Exactly `protocols.DeclarationSource`, for the reason above.
-
-
-class FactoryLineVocabulary:
-    # Declared, so registering this stand-in RUNS the version check rather than
-    # taking the absent path around it. A conformance fixture that skips the
-    # gate it is meant to demonstrate proves the gate exists and nothing else.
-    protocol_version = PROTOCOL_VERSION
-    kinds = property(lambda s: KINDS)
-    count_keys = property(lambda s: {"not_a_point": "not_a_point"})
-    def classify(s, t): return "point" if t in ("speed", "distance") else "unrecognised"
-    def is_auditable(s, kind): return kind == "point"
-    def is_expected_live(s, t): return s.classify(t) == "point"
-    def template_pattern(s, name): return None
-    def same_point(s, old, new): return True
-    def point_changes(s, old, new, *, comparable=False): return []
-    def capture_changes(s, before, after): return []
-    def captures_comparable(s, before, after): return False
-    def capture_findings(s, capture): return []
-    def peer_groups(s, declaration): return []
-    def report_sections(s): return {}
-
-
-WALK = {"samples": [
-    {"t": "2026-09-07T00:00:00Z", "nodes": {
-        "line1.spindle": {"v": 1490.0, "q": "good"},
-        "line1.gap":     {"v": None,   "q": "bad"},
-        "line1.rogue":   {"v": 3.0,    "q": "good"}}},
-    {"t": "2026-09-07T00:00:05Z", "nodes": {
-        "line1.spindle": {"v": 1495.0, "q": "good"},
-        "line1.gap":     {"v": None,   "q": "bad"},
-        "line1.rogue":   {"v": 3.1,    "q": "good"}}}]}
-REGISTER = {"assets": [{"id": "line1", "type": "mill", "tags": {
-    "spindle": {"node": "line1.spindle", "class": "speed"},
-    "gap":     {"node": "line1.gap",     "class": "distance"},
-    "absent":  {"node": "line1.absent",  "class": "speed"},
-    "retired": {"node": "line1.retired", "class": "speed", "excluded": True}}}]}
+# THE STAND-INS ARE IMPORTED, NOT DEFINED. They used to live in this file, which
+# meant the kit under test and the kit a vertical author could run were two
+# different pieces of code with nothing holding them together. They now ship in
+# `presence_audit.conformance`, and this file drives the shipped copy -- so the
+# thing that is tested is the thing that is published.
+from presence_audit.conformance import (                    # noqa: E402
+    REFERENCE_KINDS as KINDS,
+    CapturedPoint as _P,
+    Capture as _C,
+    DeclaredPoint as _D,
+    DeclarationSource as _DS,
+    ReferenceVocabulary as FactoryLineVocabulary,
+    SAMPLE_CAPTURE as WALK,
+    SAMPLE_DECLARATION as REGISTER,
+)
 
 V.reset(); V.register(FactoryLineVocabulary())
 
