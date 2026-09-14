@@ -78,16 +78,52 @@ class TestTheSetIsTheAxiomsAndNotAGuess:
         assert set(BOUND_OF_PROBLEM) - COMPARISON_PROBLEMS == {
             "approaching_limit", "approaching_floor"}
 
+    @pytest.mark.parametrize("problem_type,expected", [
+        ("approaching_limit",
+         "MB_U73_THERM_LOCAL has not reached its upper critical bound of 50.0 "
+         "and is trending toward it"),
+        ("approaching_floor",
+         "MB_U73_THERM_LOCAL has not reached its lower critical bound of 0.0 "
+         "and is trending toward it"),
+    ], ids=["ceiling", "floor"])
+    def test_a_projection_is_not_rendered_as_a_breach(self, manifest,
+                                                      problem_type, expected):
+        """The second defect, and the worse one.
+
+        Both projecting arms fire only while the reading has NOT reached the
+        critical bound -- the axiom guards them with `current <
+        critical_threshold` and `current > lower_critical`. Rendered with the
+        breach sentence they said the opposite of what happened: *is above its
+        upper high bound* for a value under the bound.
+        """
+        assert _say(manifest, problem_type, severity="high") == expected
+
     @pytest.mark.parametrize("problem_type", ["approaching_limit", "approaching_floor"])
-    def test_the_trend_arms_are_unchanged_by_this(self, manifest, problem_type):
-        """Pinned deliberately. A consumer asserts the current wording against
-        whatever version of this package is installed, so changing it here would
-        fail that repository's CI on this package's next release. The pair has to
-        move together, and this records which sentence is waiting."""
+    def test_a_projection_never_claims_a_breach_in_either_direction(
+            self, manifest, problem_type):
+        """The negative, so the sentence cannot drift back into one."""
         said = _say(manifest, problem_type, severity="high")
+        assert "BELOW" not in said and "above its upper" not in said
         assert "at or" not in said
-        assert said in ("MB_U73_THERM_LOCAL is BELOW its lower high bound",
-                        "MB_U73_THERM_LOCAL is above its upper high bound")
+
+    def test_the_bound_it_names_is_the_one_the_arm_projects_at(self, manifest):
+        """`high` is the severity both arms carry and this package maps no such
+        level, which is why the old sentence printed a level and no number. The
+        threshold either arm computes time-to is the CRITICAL one, whatever the
+        severity says, so that is the bound worth naming."""
+        assert "50.0" in _say(manifest, "approaching_limit", severity="high")
+        assert "49.0" not in _say(manifest, "approaching_limit", severity="high")
+
+    def test_a_domain_with_no_critical_bound_omits_the_number(self):
+        """Rather than printing None, which is the shape of the defect this
+        method already carries a comment about for severities."""
+        bare = Manifest(domain_id="d", sensors=[GeneratedSensor(
+            entity_type="P", declared_name="P", source="s.json",
+            upper=(9.0, None), lower=(None, None))])
+        assert bare.translate_finding(
+            {"entity_id": "P", "severity": "high",
+             "problem_type": f"approaching_limit:{READING}",
+             "reason": "r"}) == "P has not reached its upper critical bound and is trending toward it"
 
 
 class TestWhatItStillWillNotGuess:

@@ -252,9 +252,9 @@ class Manifest:
         under `upper` or `lower` on the strength of it being one of the two we know.
 
         **A breach AT the bound is not a breach BELOW it**, and both of this
-        engine's comparisons are inclusive. See the comment on the branch below
-        for what that cost on a real certificate, and for the one case in this
-        method that is still wrong and why it is not fixed in this commit.
+        engine's comparisons are inclusive. **A projection is not a breach at
+        all**, and the two arms that project were being rendered as one. Both
+        branches below say which, and what each cost.
         """
         entity_type = self.type_for_entity(finding.get("entity_id", ""))
         problem = str(finding.get("problem_type") or "")
@@ -287,6 +287,27 @@ class Manifest:
         # onto the nearest slot printed a real number under the wrong name -- `upper
         # high bound of 3.52` for a reading of 3.35. An unrecognised severity omits
         # the bound instead of asserting one.
+        if kind not in COMPARISON_PROBLEMS:
+            # A TREND, and it is not a breach. Both projecting arms fire only
+            # while the reading has NOT reached the critical bound -- the axiom
+            # guards them with `current < critical_threshold` and
+            # `current > lower_critical` -- and compute how long it would take to
+            # get there. Rendering that with the breach sentence said the
+            # opposite of what happened: *is above its upper high bound* for a
+            # value under the bound, *is BELOW its lower high bound* for one
+            # over it.
+            #
+            # The bound is the CRITICAL one whatever the severity says, because
+            # that is the only threshold either arm projects at. `high` is the
+            # severity both carry, and it has no slot among the levels this
+            # package maps, which is why the old sentence printed the level and
+            # no number at all.
+            toward = "upper" if side == "upper" else "lower"
+            text = (f"{sensor.declared_name} has not reached its {toward} "
+                    f"critical bound")
+            return text + (f" of {bounds[1]} and is trending toward it"
+                           if bounds[1] is not None else " and is trending toward it")
+
         bound = {"critical": bounds[1], "warning": bounds[0]}.get(severity)
         if kind in COMPARISON_PROBLEMS:
             # AT the bound is a breach and is not below it. Both comparisons
@@ -305,23 +326,6 @@ class Manifest:
             # unusual pairing, it is the untouched case.
             direction = ("at or BELOW its lower" if side == "lower"
                          else "at or above its upper")
-        else:
-            # THE TWO TREND ARMS, AND THIS IS STILL WRONG FOR THEM.
-            #
-            # `approaching_limit` fires while `current` is UNDER the ceiling and
-            # projected to reach it; `approaching_floor` fires while `current` is
-            # OVER the floor and falling. Rendering either as a bound breach says
-            # the opposite of what happened, and the engine's own `reason` --
-            # *trending toward critical limit* -- is the accurate sentence.
-            #
-            # Not corrected here, and the reason is release order rather than
-            # doubt. A shipped vertical asserts that every ceiling-side finding
-            # reads as *above*, parametrised over `approaching_limit`, against
-            # whatever version of this package its environment installed.
-            # Changing the wording now plants a failure in another repository's
-            # CI that fires whenever this package next releases, which is a
-            # worse defect than the one it fixes. The pair has to move together.
-            direction = "BELOW its lower" if side == "lower" else "above its upper"
         text = f"{sensor.declared_name} is {direction} {severity} bound"
         return text + (f" of {bound}" if bound is not None else "")
 
