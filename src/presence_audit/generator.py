@@ -69,7 +69,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from .supplemental import Supplemental
 
 __all__ = ["GeneratedSensor", "Manifest", "generate", "BOUND_OF_PROBLEM",
-           "peer_property", "PEER_PREFIX"]
+           "COMPARISON_PROBLEMS", "peer_property", "PEER_PREFIX"]
 
 READING = "reading"
 WINDOW = "15m"
@@ -92,6 +92,19 @@ BOUND_OF_PROBLEM = {
     "below_warning_threshold": "lower",
     "approaching_floor": "lower",
 }
+
+#: Which of those arms compare the reading to the bound NOW, as opposed to
+#: projecting a trend at it. Read off the axiom rather than inferred from the
+#: names: the four below are `current >= threshold` and `current <= threshold`,
+#: and the two that are not -- `approaching_limit`, `approaching_floor` -- fire
+#: on a slope while the reading is still inside the band.
+#:
+#: The distinction exists because only a comparison can be described as a breach.
+#: -> `translate_finding`, which says what is still wrong for the other two.
+COMPARISON_PROBLEMS = frozenset({
+    "threshold_exceeded", "threshold_warning",
+    "below_critical_threshold", "below_warning_threshold",
+})
 
 # Levels the engine has a slot for. Anything else is recorded rather than folded.
 _MAPPED_LEVELS = ("warning", "critical")
@@ -237,6 +250,11 @@ class Manifest:
         parsed rather than assumed. An unrecognised head is reported with the
         engine's own text: a prefix this build has never seen must not be filed
         under `upper` or `lower` on the strength of it being one of the two we know.
+
+        **A breach AT the bound is not a breach BELOW it**, and both of this
+        engine's comparisons are inclusive. See the comment on the branch below
+        for what that cost on a real certificate, and for the one case in this
+        method that is still wrong and why it is not fixed in this commit.
         """
         entity_type = self.type_for_entity(finding.get("entity_id", ""))
         problem = str(finding.get("problem_type") or "")
@@ -270,7 +288,37 @@ class Manifest:
         # high bound of 3.52` for a reading of 3.35. An unrecognised severity omits
         # the bound instead of asserting one.
         bound = {"critical": bounds[1], "warning": bounds[0]}.get(severity)
-        direction = "BELOW its lower" if side == "lower" else "above its upper"
+        if kind in COMPARISON_PROBLEMS:
+            # AT the bound is a breach and is not below it. Both comparisons are
+            # inclusive -- `current >= critical_threshold` on the ceiling and
+            # `current <= lower_critical` on the floor, read off the axiom -- and
+            # the axiom says why: *the threshold names the edge of acceptable,
+            # not the first unacceptable value*. This said BELOW and above, so a
+            # reading of exactly 0.0 against a declared floor of exactly 0.0 was
+            # rendered `is BELOW its lower critical bound of 0.0` and printed
+            # verbatim onto a QC certificate, where the measurement beside it
+            # read `value: 0.0, threshold: 0.0`. The verdict was right and the
+            # sentence was false; six sensors on one real board were affected,
+            # because QEMU reports exactly 0.0 for a tmp421 nobody has driven.
+            direction = ("at or BELOW its lower" if side == "lower"
+                         else "at or above its upper")
+        else:
+            # THE TWO TREND ARMS, AND THIS IS STILL WRONG FOR THEM.
+            #
+            # `approaching_limit` fires while `current` is UNDER the ceiling and
+            # projected to reach it; `approaching_floor` fires while `current` is
+            # OVER the floor and falling. Rendering either as a bound breach says
+            # the opposite of what happened, and the engine's own `reason` --
+            # *trending toward critical limit* -- is the accurate sentence.
+            #
+            # Not corrected here, and the reason is release order rather than
+            # doubt. `bmc-sensor-audit` asserts that every ceiling-side finding
+            # reads as *above*, parametrised over `approaching_limit`, against
+            # whatever version of this package is installed. Changing the wording
+            # now plants a failure in another repository's CI that fires whenever
+            # this package next releases, which is a worse defect than the one it
+            # fixes. The pair has to move together.
+            direction = "BELOW its lower" if side == "lower" else "above its upper"
         text = f"{sensor.declared_name} is {direction} {severity} bound"
         return text + (f" of {bound}" if bound is not None else "")
 
