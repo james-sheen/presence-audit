@@ -34,7 +34,7 @@ not auditing.
 
 A **sketch, not a runnable block** — the complete member list is
 `vocabulary.Vocabulary`, which documents each one and what an empty answer
-means. Fifteen members; most domains answer several of them with *nothing*.
+means. Sixteen members; most domains answer several of them with *nothing*.
 
 ```
 class MyVocabulary:
@@ -43,7 +43,7 @@ class MyVocabulary:
     def classify(self, declared_type): ...        # must return a member of `kinds`
     def is_auditable(self, kind): ...             # which kinds the audit is about
     def is_expected_live(self, declared_type): ...
-    # ... and eight more, including the three that let a domain say
+    # ... and nine more, including the three that let a domain say
     #     something about its own capture that the pairing cannot see
 
 def register():

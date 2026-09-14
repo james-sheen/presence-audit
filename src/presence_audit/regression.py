@@ -72,7 +72,14 @@ class Change:
 
     @property
     def is_regression(self) -> bool:
-        return self.kind in REGRESSION_KINDS
+        # UNION with the domain's own. The set above is the core's, and a
+        # vertical's own kinds were never in it -- so a domain finding the report
+        # carried scored as nothing, and `exit_code` reported clean over a defect
+        # printed two lines above it. The core's members stay: a vocabulary says
+        # which of ITS kinds count, and does not get to say that a declared point
+        # being absent does not.
+        return (self.kind in REGRESSION_KINDS
+                or self.kind in _vocabulary.regression_kinds())
 
     def __str__(self) -> str:
         return f"[{self.kind}] {self.sensor} -- {self.detail}"
@@ -106,8 +113,13 @@ class RegressionReport:
         return by_kind
 
 
-def _index(walk: Capture) -> tuple[dict[str, CapturedPoint], dict[str, CapturedPoint]]:
+def _index(points: Sequence[CapturedPoint]) -> tuple[
+        dict[str, CapturedPoint], dict[str, CapturedPoint]]:
     """By name and by URI, first occurrence winning in both.
+
+    Takes the POINTS, not the capture. Reading `capture.points` here as well as
+    in the caller is what made every pairing depend on a capture handing back
+    the same objects twice -- see `_compare_walks`.
 
     `setdefault` rather than assignment because a machine can report the same name
     twice -- the deprecated tree and the modern collection both carry it, and a
@@ -116,10 +128,42 @@ def _index(walk: Capture) -> tuple[dict[str, CapturedPoint], dict[str, CapturedP
     """
     by_name: dict[str, CapturedPoint] = {}
     by_path: dict[str, CapturedPoint] = {}
-    for sensor in walk.points:
+    for sensor in points:
         by_name.setdefault(sensor.name, sensor)
         by_path.setdefault(sensor.path, sensor)
     return by_name, by_path
+
+
+def prefix_pairs(renames: Sequence[Sequence[str]]) -> list[tuple[str, str]]:
+    """Read (OLD, NEW) pairs given as two values, with no separator involved.
+
+    THE FORM FOR NAMES THAT CONTAIN AN EQUALS SIGN, and one whole family of
+    address does: every OPC UA node id is `ns=2;s=...`. `parse_prefix_map`
+    partitions on the first `=`, so such an OLD prefix cannot be written down
+    there at all -- `ns=2;s==ns=2;s=L1.` reads as a rename of `ns`, declares
+    nothing that matches, and produces the mass-removal report the flag exists
+    to prevent, with no typo anywhere for anyone to find.
+
+    Kept as a second entry point rather than a change to the first, because the
+    string form is what a command line has and two published tools pass it
+    through. A caller building pairs itself was always able to hand
+    `compare_walks` its own list; this names that path and refuses the same
+    empty declarations, so it is the flag form of a capability that existed.
+    """
+    parsed: list[tuple[str, str]] = []
+    for rename in renames:
+        try:
+            old, new = rename
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"a rename is exactly two values, an old prefix and a new one; "
+                f"got {rename!r}") from None
+        old, new = str(old), str(new)
+        if not old and not new:
+            raise ValueError(
+                "a rename with neither an old nor a new prefix declares nothing")
+        parsed.append((old, new))
+    return parsed
 
 
 def parse_prefix_map(entries: Sequence[str]) -> list[tuple[str, str]]:
@@ -129,6 +173,14 @@ def parse_prefix_map(entries: Sequence[str]) -> list[tuple[str, str]]:
     subtrees are the same one, and a typo that silently declared nothing would
     produce the full mass-removal report the flag was passed to prevent -- with no
     sign that the flag had not been understood.
+
+    **THE OLD PREFIX CANNOT CONTAIN AN EQUALS SIGN.** The split is on the first
+    one, so it is the NEW half that may carry them. This is a property of the
+    string form and not a bug in the split -- there is no separator a prefix
+    cannot contain -- and it is stated because the failure it produces is the
+    silent one: a prefix read short declares a rename nothing matches, and the
+    report is the mass removal, with no typo to find. `prefix_pairs` takes the
+    two halves separately and has no separator to escape.
     """
     parsed: list[tuple[str, str]] = []
     for entry in entries:
@@ -138,7 +190,9 @@ def parse_prefix_map(entries: Sequence[str]) -> list[tuple[str, str]]:
                 f"--aggregation-prefix {entry!r} is not OLD=NEW. The old prefix is "
                 f"the one in the earlier walk; an empty new prefix is allowed and "
                 f"means the prefix was dropped, and an empty OLD is allowed and "
-                f"means a prefix was added to every name")
+                f"means a prefix was added to every name. An old prefix that "
+                f"itself contains an equals sign cannot be written in this form "
+                f"at all -- pass the two halves to `prefix_pairs` instead")
         if not old and not new:
             # `=` on its own declares nothing and would match every name, so it
             # reads as a typo for one of the two useful forms rather than as an
@@ -166,12 +220,12 @@ def _apply_prefix(name: str, prefix_map: Sequence[tuple[str, str]]) -> str:
     return name
 
 
-def _pair(before: Capture, after: Capture,
+def _pair(before_points: Sequence[CapturedPoint], after_points: Sequence[CapturedPoint],
           prefix_map: Sequence[tuple[str, str]] = ()) -> tuple[
               list[tuple[CapturedPoint, CapturedPoint]], list[CapturedPoint], list[CapturedPoint],
               list[tuple[CapturedPoint, CapturedPoint]]]:
-    before_names, before_paths = _index(before)
-    after_names, after_paths = _index(after)
+    before_names, before_paths = _index(before_points)
+    after_names, after_paths = _index(after_points)
 
     pairs: list[tuple[CapturedPoint, CapturedPoint]] = []
     prefixed: list[tuple[CapturedPoint, CapturedPoint]] = []
@@ -234,14 +288,14 @@ def _pair(before: Capture, after: Capture,
         new = after_paths.get(path)
         if new is None or id(new) in claimed_after:
             continue
-        if not _vocabulary.current().same_point(old, new):
+        if not _vocabulary.member("same_point")(old, new):
             continue
         pairs.append((old, new))
         claimed_before.add(id(old))
         claimed_after.add(id(new))
 
-    gone = [s for s in before.points if id(s) not in claimed_before]
-    arrived = [s for s in after.points if id(s) not in claimed_after]
+    gone = [s for s in before_points if id(s) not in claimed_before]
+    arrived = [s for s in after_points if id(s) not in claimed_after]
     return pairs, gone, arrived, prefixed
 
 
@@ -357,12 +411,29 @@ def _compare_walks(before: Capture, after: Capture, *,
     `prefix_map` is the operator's declared aggregation-prefix map, `(old, new)`
     pairs. Empty is the normal case and changes nothing.
     """
-    report = RegressionReport(before_count=len(before.points), after_count=len(after.points),
+    # READ ONCE, AND THIS IS THE WHOLE OF THE FIX ABOVE.
+    #
+    # Every pairing pass below claims points into `claimed_before` /
+    # `claimed_after` by object identity, and the leftovers were then computed by
+    # reading `capture.points` a SECOND time. `points` is typed `->
+    # Iterable[CapturedPoint]` and nothing in the protocol says the same objects
+    # come back twice; the kit's own sample capture builds a fresh list on every
+    # read, which is the natural reading and the one the kit teaches. Against
+    # such a capture nothing was ever claimed, and a capture compared with
+    # ITSELF came back as every point removed and every point re-added.
+    #
+    # The alternative was to require identity-stable `points` in the protocol
+    # and check it in the kit -- which would make the kit's own stand-in the
+    # first thing to fail, and would put a requirement on every vertical to fix
+    # an assumption that only this module makes.
+    before_points = list(before.points)
+    after_points = list(after.points)
+    report = RegressionReport(before_count=len(before_points), after_count=len(after_points),
                               complete=before.complete and after.complete,
-                              fields_comparable=_vocabulary.current().captures_comparable(before, after))
+                              fields_comparable=_vocabulary.member("captures_comparable")(before, after))
     changes: list[Change] = []
 
-    pairs, gone, arrived, prefixed = _pair(before, after, prefix_map)
+    pairs, gone, arrived, prefixed = _pair(before_points, after_points, prefix_map)
     report.paired = len(pairs)
     report.prefix_paired = len(prefixed)
 
@@ -389,7 +460,7 @@ def _compare_walks(before: Capture, after: Capture, *,
         # Change rules only this domain can state. Each one reads something the
         # other bridge's capture does not have, so the neutral gate asks rather
         # than knowing.
-        changes.extend(_vocabulary.current().point_changes(
+        changes.extend(_vocabulary.member("point_changes")(
             old, new, comparable=report.fields_comparable))
         _compare_thresholds(old, new, changes)
 
@@ -424,7 +495,7 @@ def _compare_walks(before: Capture, after: Capture, *,
             f"{_vocabulary.noun()[1].capitalize()} appearing and disappearing are "
             f"not reported"))
 
-    changes.extend(_vocabulary.current().capture_changes(before, after))
+    changes.extend(_vocabulary.member("capture_changes")(before, after))
 
     report.changes = changes
     return report

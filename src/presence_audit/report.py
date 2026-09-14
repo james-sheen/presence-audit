@@ -48,6 +48,7 @@ KIND_ORDER = (
     "unclassified_threshold_level",
     "unreadable_threshold_value",
     "malformed_exposes",
+    "duplicate_address",
     "config_unreadable",
     "walk_incomplete",
     "disabled_in_config_but_live",
@@ -86,6 +87,7 @@ def headlines(singular: str | None = None) -> dict:
         "unknown_threshold_direction": "Threshold direction not recognised",
         "unclassified_threshold_level": "Threshold severity level not recognised",
         "unreadable_threshold_value": "Threshold value is not a number",
+        "duplicate_address": f"More than one {singular} at one address",
         "malformed_exposes": "Malformed declaration record",
         "config_unreadable": "Declaration file could not be read",
         "walk_incomplete": "The capture did not finish",
@@ -115,7 +117,8 @@ def _as_json(report: DiffReport, *, target: str | None = None,
         "counts": report.counts(),
         "exit_code": report.exit_code,
         "findings": [
-            {"kind": f.kind, "sensor": f.sensor, "detail": f.detail,
+            {"kind": f.kind, "sensor": f.sensor, **_own_key(f.sensor),
+             "detail": f.detail,
              "regression": f.is_regression,
              "declared_in": f.declared_in, "live_path": f.live_path}
             for f in _ordered(report)
@@ -127,22 +130,67 @@ def _as_json(report: DiffReport, *, target: str | None = None,
         # fields it was built from: a machine consumer should not have to parse a
         # sentence, and a person reading raw JSON should not have to reassemble one.
         payload["declaration_sources"] = [
-            {"format": source.kind, "path": source.path,
-             "platform": source.platform, "firmware": source.firmware,
-             "captured_at": source.captured_at,
-             "derived_from": source.derived_from,
-             "reviewed_by": source.reviewed_by, "reviewed_on": source.reviewed_on,
-             "downgrade": source.is_downgrade,
-             "sensors_supplied": list(source.supplied),
-             "provenance": source.provenance_line()}
-            for source in report.declaration_sources
-        ]
+            _source_as_json(source) for source in report.declaration_sources]
     if walk is not None:
         # Sections the VERTICAL adds, under the names it gives them. Naming
         # `strict_fields` here is what made this builder know about Redfish.
-        for key, build in _vocabulary.current().report_sections().items():
+        for key, build in _vocabulary.member("report_sections")().items():
             payload[key] = build(walk)
     return json.dumps(payload, indent=2, sort_keys=False)
+
+
+def _own_key(value: Any) -> dict:
+    """The domain's own key for a record, beside the published one, or nothing.
+
+    A line audit's certificate came out reading "sensor": ST-01.die_temp_c,
+    because every finding, decline and evidence record in this core is keyed on
+    one domain's word. That word cannot simply move -- "cert-generator" reads it
+    out of a finding and "bmc-sensor-audit" reads several more -- so the domain's
+    key is ADDED and the published one stays. For the vertical the key was named
+    after, the two are the same word and nothing is added at all.
+    """
+    key = _vocabulary.record_key()
+    return {key: value} if key else {}
+
+
+def _own_counts(before: int, after: int) -> dict:
+    key = _vocabulary.record_key(plural=True)
+    return {f"{key}_before": before, f"{key}_after": after} if key else {}
+
+
+def _source_as_json(source: Any) -> dict:
+    """One provenance entry, from whatever the protocol actually promises.
+
+    `DeclarationSource.sources` promises `Sequence[object]` -- the files or
+    authorities read -- and this function used to read ELEVEN members off each
+    element, unguarded. `declaration_sources_as_text` next door had already been
+    through exactly this: its docstring records the crash, for the first domain
+    that answered with what the protocol allows. The lesson was applied in one
+    function and not in its neighbour, and the two then disagreed about the type
+    of one field.
+
+    The direction of the disagreement is what made it worth fixing rather than
+    documenting. The PERMISSIVE writer is the one a person reads; the strict one
+    is the machine-readable half. So a run whose sources were plain strings
+    printed a clean report and raised `AttributeError` on `--json` -- and an
+    uncaught one exits 1, which in this package means findings. A run that could
+    not complete reported a judgment nobody made.
+    """
+    described = getattr(source, "provenance_line", None)
+    supplied = getattr(source, "supplied", None)
+    return {"format": getattr(source, "kind", None),
+            # A source that is just a path IS its path, which is what the text
+            # report prints for one. Neither half invents a `kind` for it.
+            "path": getattr(source, "path", None) if hasattr(source, "path") else str(source),
+            "platform": getattr(source, "platform", None),
+            "firmware": getattr(source, "firmware", None),
+            "captured_at": getattr(source, "captured_at", None),
+            "derived_from": getattr(source, "derived_from", None),
+            "reviewed_by": getattr(source, "reviewed_by", None),
+            "reviewed_on": getattr(source, "reviewed_on", None),
+            "downgrade": getattr(source, "is_downgrade", None),
+            "sensors_supplied": list(supplied) if supplied is not None else None,
+            "provenance": described() if callable(described) else str(source)}
 
 
 def declaration_sources_as_text(sources: Sequence[Any]) -> list[str]:
@@ -302,14 +350,25 @@ CHANGE_ORDER = (
 def change_headlines(singular: str | None = None) -> dict:
     """Change headlines, in the domain's own noun. Public for the same reason
     `headlines` is, and a function for the same reason: the noun is not known at
-    import time."""
+    import time.
+
+    THE NOUN WAS COMPUTED AND DISCARDED. Every sentence below elided its subject
+    -- *Reported before, not reported now* -- so the one value this function goes
+    and fetches was never used, and the docstring's claim was true of `headlines`
+    next door and of nothing here.
+
+    The KEYS are a different question and are deliberately unchanged. Five of
+    them carry one domain's noun, and they are format: "bmc-sensor-audit" and
+    "cert-generator" read change kinds out of a published report. A kind renamed
+    is a reader broken, so what moves is the prose a person reads.
+    """
     if singular is None:
         singular = _vocabulary.noun()[0]
     return {
-    "sensor_removed": "Reported before, not reported now",
-    "sensor_renamed": "Same address, different name",
+    "sensor_removed": f"A {singular} reported before and not now",
+    "sensor_renamed": f"Same address, a different {singular} name",
     "reading_lost": "Still enabled, no longer reading",
-    "sensor_disabled": "Switched off since the earlier capture",
+    "sensor_disabled": f"A {singular} switched off since the earlier capture",
     # Was `the earlier firmware`. What carried the threshold is the earlier
     # CAPTURE -- true of a BMC, a PLC and anything else that gets captured twice.
     "threshold_removed": "Threshold the earlier capture carried is gone",
@@ -319,8 +378,8 @@ def change_headlines(singular: str | None = None) -> dict:
     "field_drift": "New properties the published schema does not declare",
     "walk_incomplete": "A walk did not finish",
     "threshold_added": "A threshold appeared",
-    "sensor_enabled": "Switched on since the earlier walk",
-    "sensor_added": "Reported now, absent from the earlier capture",
+    "sensor_enabled": f"A {singular} switched on since the earlier walk",
+    "sensor_added": f"A {singular} reported now and absent from the earlier capture",
     "aggregation_prefix_shift": "A subtree may have moved behind a new prefix",
     "aggregation_prefix_paired": "Paired across a declared aggregation prefix",
 }
@@ -350,12 +409,14 @@ def _regression_as_json(report: RegressionReport, *, before: str, after: str) ->
         "fields_comparable": report.fields_comparable,
         "sensors_before": report.before_count,
         "sensors_after": report.after_count,
+        **_own_counts(report.before_count, report.after_count),
         "paired": report.paired,
         "paired_through_declared_prefix": report.prefix_paired,
         "counts": report.counts(),
         "regressions": len(report.regressions),
         "changes": [
-            {"kind": c.kind, "sensor": c.sensor, "detail": c.detail,
+            {"kind": c.kind, "sensor": c.sensor, **_own_key(c.sensor),
+             "detail": c.detail,
              "regression": c.is_regression,
              "before_path": c.before_path, "after_path": c.after_path}
             for c in _ordered_changes(report)

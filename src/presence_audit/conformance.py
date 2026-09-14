@@ -41,7 +41,7 @@ argument the core half runs alone.
 from __future__ import annotations
 
 import sys
-from typing import Any, List
+from typing import Any, List, Mapping
 
 from . import diff, protocols, regression, vocabulary
 from .plugins import PluginError, load_spec
@@ -263,6 +263,93 @@ _STRING_MEMBERS = ("classify", "is_auditable", "is_expected_live",
                    "template_pattern")
 
 
+def _check_the_optional_members(supplied: Any) -> List[str]:
+    """Whether the core ACCEPTS the members it reads defensively.
+
+    FOUR, and the fourth is the reason this function is named for a count no
+    longer in it. `regression_kinds` was added while closing the issue that this
+    check exists to answer -- a member in neither of the kit's lists -- and
+    adding it without a check here would have reproduced that defect in the fix
+    for it.
+
+    Each is declared optional, so its absence is not a fault. What is a fault is
+    declaring one in a shape the accessor rejects: the fallback then hands the
+    report a default, nothing raises, and the only place the mistake can surface
+    is here.
+    """
+    found: List[str] = []
+    with vocabulary.using(supplied):
+        if hasattr(supplied, "noun") and vocabulary.noun() == vocabulary.DEFAULT_NOUN:
+            if tuple(_quietly(lambda: tuple(supplied.noun)) or ()) != vocabulary.DEFAULT_NOUN:
+                found.append(
+                    "declares a 'noun' the core does not accept, so the report "
+                    "is written in the default word and nothing says so. It "
+                    "must be a (singular, plural) pair of strings read as an "
+                    "ATTRIBUTE -- a method answers the pair to you and the "
+                    "default to the core")
+        if hasattr(supplied, "count_keys") and not vocabulary.count_keys():
+            if _either_shape(supplied, "count_keys"):
+                found.append(
+                    "declares 'count_keys' the core does not accept; it must "
+                    "be a mapping read as an ATTRIBUTE. The per-kind counts are "
+                    "silently absent from the report otherwise")
+        if hasattr(supplied, "count_labels") and not vocabulary.count_labels():
+            if _either_shape(supplied, "count_labels"):
+                found.append(
+                    "declares 'count_labels' the core does not accept; it must "
+                    "be a METHOD returning key -> label or key -> (label, "
+                    "note). Its counts print under their raw key names instead")
+        if (hasattr(supplied, "regression_kinds")
+                and not vocabulary.regression_kinds()):
+            if _either_shape(supplied, "regression_kinds") or _quietly(
+                    lambda: tuple(supplied.regression_kinds)):
+                found.append(
+                    "declares 'regression_kinds' the core does not accept; it "
+                    "must be a sequence of kind names, read as an attribute or "
+                    "called. Its own kinds score as nothing otherwise, and a "
+                    "report carrying a real defect composes a clean verdict")
+    return found
+
+
+def _either_shape(supplied: Any, name: str):
+    """The mapping this member yields, read as an attribute OR called.
+
+    BOTH, deliberately. The defect being caught is a member declared in the
+    wrong one of those two shapes, so a probe that tries only the right shape
+    finds nothing and reports the vocabulary clean -- which is the bug it exists
+    to catch, reproduced inside the check for it. Measured: a `count_labels`
+    declared as a property went green here until this tried reading as well as
+    calling.
+    """
+    member = _quietly(lambda: getattr(supplied, name))
+    for candidate in (_quietly(lambda: dict(member())), _quietly(lambda: dict(member))):
+        if candidate:
+            return candidate
+    return None
+
+
+def _quietly(call):
+    """What `call` answers, or None. Used only to ask whether the VERTICAL has
+    something the core turned down -- a member that raises has nothing."""
+    try:
+        return call()
+    except Exception:                                       # noqa: BLE001
+        return None
+
+
+def _capture_findings(supplied: Any, capture: Any, declaration: Any):
+    """Call `capture_findings` at whichever arity this vocabulary offers.
+
+    The core does the same, by signature. Exercising only the one-argument form
+    would leave the kit unable to see the arity it is telling authors they may
+    use.
+    """
+    hook = supplied.capture_findings
+    if diff._wants_declaration(hook):
+        return hook(capture, declaration=declaration)
+    return hook(capture)
+
+
 def check_a_vocabulary(supplied: Any):
     """Exercise a vocabulary with what the kit can honestly hand it.
 
@@ -285,7 +372,7 @@ def check_a_vocabulary(supplied: Any):
         "captures_comparable": lambda v: v.captures_comparable(capture, capture),
         "point_changes": lambda v: v.point_changes(one, two),
         "capture_changes": lambda v: v.capture_changes(capture, capture),
-        "capture_findings": lambda v: v.capture_findings(capture),
+        "capture_findings": lambda v: _capture_findings(v, capture, declaration),
         "peer_groups": lambda v: v.peer_groups(declaration),
     }
     for member in _OBJECT_MEMBERS + _STRING_MEMBERS:
@@ -337,6 +424,37 @@ def check_a_vocabulary(supplied: Any):
             problems.append(f"audits none of its own kinds {list(kinds)}, so "
                             f"every declared point is set aside and the audit "
                             f"reports cleanly over nothing")
+
+    # THE FOUR MEMBERS THE KIT USED TO SKIP. `noun`, `count_keys` and
+    # `count_labels` are read by the core through `getattr` with a silent
+    # fallback, and `report_sections` is read unguarded; neither treatment is
+    # visible from outside, so a vocabulary could answer all four in a shape the
+    # core rejects and still finish a conformance run clean.
+    #
+    # ASKED THROUGH THE CORE, not restated here. A second statement of the shape
+    # is a second thing to keep in step with the accessors, and it would agree
+    # with them right up until one moved. What these compare is what the
+    # VERTICAL declares against what the CORE came back with: a `noun` declared
+    # as a method answers `("point", "points")` through the accessor, which is
+    # the exact refactor -- property to method -- that put one domain's word
+    # back into another domain's report, past a green run.
+    problems.extend(_check_the_optional_members(supplied))
+
+    if not hasattr(supplied, "report_sections"):
+        problems.append("declares no 'report_sections', which the protocol "
+                        "lists as required and the report reads unguarded")
+    else:
+        try:
+            sections = supplied.report_sections()
+        except Exception as error:                          # noqa: BLE001
+            problems.append(f"report_sections() raised "
+                            f"{type(error).__name__}: {error}. The report calls "
+                            f"it on every render")
+        else:
+            if not isinstance(sections, Mapping):
+                problems.append(f"report_sections() answered "
+                                f"{type(sections).__name__}, not a mapping of "
+                                f"name -> builder; the report iterates it")
 
     declared = getattr(supplied, "protocol_version", None)
     if declared is not None and declared != protocols.PROTOCOL_VERSION:

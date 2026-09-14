@@ -28,9 +28,10 @@ case this tool was built for -- the disabled point that nothing displays.
 
 from __future__ import annotations
 
+import inspect
 import re
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 from .protocols import DeclarationSource, DeclaredPoint
 from . import vocabulary as _vocabulary
@@ -65,7 +66,14 @@ class Finding:
 
     @property
     def is_regression(self) -> bool:
-        return self.kind in REGRESSION_KINDS
+        # UNION with the domain's own. The set above is the core's, and a
+        # vertical's own kinds were never in it -- so a domain finding the report
+        # carried scored as nothing, and `exit_code` reported clean over a defect
+        # printed two lines above it. The core's members stay: a vocabulary says
+        # which of ITS kinds count, and does not get to say that a declared point
+        # being absent does not.
+        return (self.kind in REGRESSION_KINDS
+                or self.kind in _vocabulary.regression_kinds())
 
     def __str__(self) -> str:
         return f"[{self.kind}] {self.sensor} -- {self.detail}"
@@ -134,7 +142,7 @@ class DiffReport:
             # The kinds a vertical reports separately, under the names IT gives
             # them. Naming them here is what made this module know about BMCs.
             **{key: len(self.not_sensor_kinds.get(kind, []))
-               for kind, key in _vocabulary.current().count_keys.items()},
+               for kind, key in _vocabulary.member("count_keys").items()},
             "findings": len(self.findings),
             "regressions": len(self.regressions),
         }
@@ -152,17 +160,36 @@ def normalise_name(name: str) -> str:
     return _SEPARATORS.sub("_", name.strip().lower())
 
 
-def _index_live(walk: Capture) -> tuple[dict[str, CapturedPoint], dict[str, CapturedPoint]]:
+def _index_live(walk: Capture) -> tuple[dict[str, CapturedPoint],
+                                        dict[str, CapturedPoint], dict[str, int]]:
+    """By name and by normalised name, first occurrence winning -- and how many
+    points were seen at each address.
+
+    THE THIRD VALUE IS THE POINT OF IT. `setdefault` keeps the first point at an
+    address and discards every later one, so which of them a declared point is
+    judged against is the order the capture happened to list them in. Two points
+    at one address that differ in whether they read give `reading` in one order
+    and `present_not_reading`, a finding and a regression in the other -- from
+    the same two points, with nothing anywhere saying one was dropped.
+
+    The rule is not changed here: a declared address still matches one point.
+    What changes is that the discard stops being silent, which is the half that
+    makes it a defect rather than a limitation. Matching the SET of points at an
+    address is a change to `Match` and a design question, not a patch.
+    """
     exact: dict[str, CapturedPoint] = {}
     normalised: dict[str, CapturedPoint] = {}
+    seen: dict[str, int] = {}
     for sensor in walk.points:
         exact.setdefault(sensor.name, sensor)
         normalised.setdefault(normalise_name(sensor.name), sensor)
-    return exact, normalised
+        seen[sensor.name] = seen.get(sensor.name, 0) + 1
+    return exact, normalised, {name: n for name, n in seen.items() if n > 1}
 
 
-def _pair(declaration: Iterable[DeclaredPoint], walk: Capture) -> tuple[list[Match], list[DeclaredPoint]]:
-    exact, normalised = _index_live(walk)
+def _pair(declaration: Iterable[DeclaredPoint], walk: Capture) -> tuple[
+        list[Match], list[DeclaredPoint], dict[str, int]]:
+    exact, normalised, duplicated = _index_live(walk)
     claimed: set[str] = set()
     matches: list[Match] = []
     unmatched: list[DeclaredPoint] = []
@@ -188,7 +215,7 @@ def _pair(declaration: Iterable[DeclaredPoint], walk: Capture) -> tuple[list[Mat
             still_pending.append(declared)
 
     for declared in still_pending:
-        pattern = _vocabulary.current().template_pattern(declared.name)
+        pattern = _vocabulary.member("template_pattern")(declared.name)
         hit = None
         if pattern is not None:
             for sensor in walk.points:
@@ -201,7 +228,7 @@ def _pair(declaration: Iterable[DeclaredPoint], walk: Capture) -> tuple[list[Mat
         else:
             unmatched.append(declared)
 
-    return matches, unmatched
+    return matches, unmatched, duplicated
 
 
 def _compare_thresholds(match: Match, findings: list[Finding]) -> None:
@@ -256,7 +283,7 @@ def expects_reading(sensor: DeclaredPoint) -> bool:
     """
     if sensor.expects_reading is not None:
         return sensor.expects_reading
-    return _vocabulary.current().is_expected_live(sensor.type)
+    return _vocabulary.member("is_expected_live")(sensor.type)
 
 
 def _classify_excluded(declared: list) -> dict:
@@ -270,7 +297,7 @@ def _classify_excluded(declared: list) -> dict:
     for sensor in declared:
         if expects_reading(sensor):
             continue
-        kind = _vocabulary.current().classify(sensor.type)
+        kind = _vocabulary.member("classify")(sensor.type)
         excluded.setdefault(kind, []).append(sensor)
     return excluded
 
@@ -298,6 +325,31 @@ def compare(declaration: DeclarationSource, walk: Capture, *,
                         include_disabled_in_config=include_disabled_in_config)
 
 
+def _wants_declaration(hook: object) -> bool:
+    """Whether this `capture_findings` accepts the declaration as well.
+
+    True for a parameter named `declaration`, and for a `**kwargs` that would
+    absorb it. Anything the signature cannot be read from -- a builtin, a C
+    callable, an object whose `__call__` hides behind a descriptor -- answers
+    False, which is the arity every published vertical already has.
+    """
+    try:
+        parameters = inspect.signature(hook).parameters
+    except (TypeError, ValueError):
+        return False
+    return any(p.name == "declaration" or p.kind is inspect.Parameter.VAR_KEYWORD
+               for p in parameters.values())
+
+
+def _capture_findings(walk: Capture, declaration: DeclarationSource) -> Sequence[Finding]:
+    """The domain's own findings from its own capture, with the declaration
+    offered to a vocabulary written to take it."""
+    hook = _vocabulary.member("capture_findings")
+    if _wants_declaration(hook):
+        return hook(walk, declaration=declaration)
+    return hook(walk)
+
+
 def _compare(declaration: DeclarationSource, walk: Capture, *,
              include_disabled_in_config: bool = False) -> DiffReport:
     report = DiffReport(walk_complete=walk.complete,
@@ -319,7 +371,13 @@ def _compare(declaration: DeclarationSource, walk: Capture, *,
     # `.points` on both, never iteration of the object itself. The protocol is
     # the whole contract a second bridge gets: anything this module needs that
     # the protocol does not declare is a requirement nobody outside can discover.
-    all_matches, unmatched_declared = _pair(list(declaration.points), walk)
+    all_matches, unmatched_declared, duplicated = _pair(list(declaration.points), walk)
+    for name, count in sorted(duplicated.items()):
+        findings.append(Finding(
+            "duplicate_address", name,
+            f"the capture holds {count} points at this one address and the "
+            f"pairing keeps the first; the rest are not reported at all, and "
+            f"which one survives is the order the capture listed them in"))
     matched_paths = {m.live.path for m in all_matches}
     report.matches = all_matches
     report.unmatched_live = [s for s in walk.points if s.path not in matched_paths]
@@ -349,7 +407,22 @@ def _compare(declaration: DeclarationSource, walk: Capture, *,
             anomaly.kind, anomaly.sensor or "(config)", anomaly.detail, anomaly.source))
     # Findings only this domain can produce from its own capture. The diff does
     # not know what they are; it knows they belong beside its own.
-    findings.extend(_vocabulary.current().capture_findings(walk))
+    #
+    # THE DECLARATION IS OFFERED, because a domain finding can depend on what a
+    # point was declared as and this hook used to receive the capture alone. Its
+    # only caller has held both all along: a vertical auditing deliverables
+    # reported a meeting as an unowned deliverable, because the tracker row was
+    # all it could see and the declaration knew the row was a ceremony. No other
+    # member carries both halves, so there was no way to express the finding.
+    #
+    # Passed only to a vocabulary that asks for it, by signature. A vertical
+    # published before this takes one argument, and the conformance kit has
+    # required exactly that arity since it shipped -- so an unconditional second
+    # argument would raise `TypeError` for every vocabulary in existence. A
+    # `try/except TypeError` would do it too and would also swallow a genuine
+    # `TypeError` raised three frames inside the vertical, reporting a domain's
+    # own bug as an arity mismatch.
+    findings.extend(_capture_findings(walk, declaration))
     for source, reason in declaration.unreadable:
         findings.append(Finding(
             "config_unreadable", "(config)",

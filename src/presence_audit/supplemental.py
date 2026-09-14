@@ -192,6 +192,34 @@ class Supplemental:
         return named | {c.sensor for c in self.counters}
 
 
+def _own(plural: bool = False) -> str | None:
+    """The domain's own spelling of an input key, or None when it is ours."""
+    return _vocabulary.record_key(plural=plural)
+
+
+def _either(block: dict, key: str):
+    """A block's value under the published key OR the domain's own word for it.
+
+    The published spellings are REQUIRED INPUT keys here, so a vertical whose
+    domain is a different one had to write another domain's noun into its own
+    supplemental file to be read at all -- the one surface it could not route
+    around by writing its own report. Both spellings are accepted now; neither
+    is required to be the one the published format was named after.
+    """
+    own = _own(plural=key.endswith("s"))
+    if own is not None and own in block:
+        return block[own]
+    return block.get(key)
+
+
+def _require_named(block: dict, key: str, where: str):
+    """`_require`, over either spelling of a domain-named key."""
+    own = _own(plural=key.endswith("s"))
+    if own is not None and own in block:
+        return block[own]
+    return _require(block, key, where)
+
+
 def _require(block: dict, key: str, where: str):
     value = block.get(key)
     if value is None or (isinstance(value, str) and not value.strip()):
@@ -231,7 +259,7 @@ def load_supplemental(path: str | Path) -> Supplemental:
         where = f"{path}: redundant_groups[{index}]"
         if not isinstance(block, dict):
             raise SupplementalError(f"{where} is not an object")
-        sensors = block.get("sensors")
+        sensors = _either(block, "sensors")
         if not isinstance(sensors, list) or len(sensors) < 2:
             raise SupplementalError(
                 f"{where} names {sensors!r}; a redundant group needs at least two "
@@ -292,7 +320,7 @@ def load_supplemental(path: str | Path) -> Supplemental:
                 f"{where} declares direction {direction!r}; this build knows "
                 f"{list(_DIRECTIONS)}")
         result.counters.append(Counter(
-            sensor=str(_require(block, "sensor", where)),
+            sensor=str(_require_named(block, "sensor", where)),
             basis=str(_require(block, "basis", where)),
             direction=direction,
             allow_reset=bool(block.get("allow_reset", True))))

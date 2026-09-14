@@ -35,6 +35,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import exit_contract
+from . import vocabulary as _vocabulary
+
 __all__ = ["build_attestation", "validate_attestation", "ATTESTATION_FORMAT",
            "ACCEPTED_ATTESTATION_FORMATS"]
 
@@ -99,6 +102,13 @@ def validate_attestation(artifact: Any) -> list[str]:
         # one fault at a time.
         return problems + shape
 
+    # The verdict block, when there is one. ABSENCE IS NOT A PROBLEM: every
+    # artifact written before the slot existed has none, and refusing those
+    # would make recording a conclusion a breaking change. What is checked is
+    # that a block which IS present is expressible and self-consistent.
+    if "verdict" in artifact:
+        problems.extend(_verdict_problems(artifact["verdict"]))
+
     if len(artifact["evidence"]) != len(artifact["findings"]):
         problems.append(
             f"{len(artifact['findings'])} finding(s) but "
@@ -143,14 +153,47 @@ def validate_attestation(artifact: Any) -> list[str]:
     return problems
 
 
+def _verdict_problems(block: Any) -> list[str]:
+    """Whether a verdict block is expressible in the core's vocabulary."""
+    if not isinstance(block, dict):
+        return [f"'verdict' is {type(block).__name__}, not an object"]
+    found: list[str] = []
+    code = block.get("exit_code")
+    if code not in exit_contract.MEANING:
+        found.append(f"verdict.exit_code is {code!r}; the contract has "
+                     f"{sorted(exit_contract.MEANING)}")
+    elif "meaning" in block and block["meaning"] != exit_contract.MEANING[code]:
+        found.append(f"verdict.meaning is {block['meaning']!r} beside exit_code "
+                     f"{code}, which means "
+                     f"{exit_contract.MEANING[code]!r}")
+    if not block.get("scored_by"):
+        found.append("verdict names no 'scored_by'; the code is the producer's "
+                     "claim and not this core's, and an unattributed one reads "
+                     "as though the artifact had been scored by its format")
+    return found
+
+
 def build_attestation(session: Any, envelope: dict, describe: dict,
                       manifest: Any, *, target: str,
-                      attest_fn: Any) -> dict:
+                      attest_fn: Any, verdict: Any = None) -> dict:
     """Assemble the artifact from an envelope `check()` has already produced.
 
     `attest_fn` is passed in rather than imported, because this module must not
     import `arbiter_engine` at module scope -- Stage 1 runs on a bench with nothing
     provisioned, and an import here would make the whole CLI need the extra.
+
+    `verdict` is the producer's own conclusion, and it is OPTIONAL because this
+    core cannot compute one. `exit_contract` holds the compose rule and nothing
+    else; floors belong to each vertical, which is exactly why the artifact could
+    not say what the run concluded -- it recorded everything the run SAW and
+    nothing it decided, and a recipient had to re-derive the conclusion from two
+    lists without knowing whether a floor table had been applied.
+
+    What the core owns is the VOCABULARY a conclusion is expressed in, so what it
+    supplies is a slot with an agreed spelling. Pass `verdict_block(code,
+    scored_by=...)`. A vertical that needed this before invented a key name, and
+    the next one would have invented a different one: two artifacts both carrying
+    a verdict that no single reader could read.
     """
     problem_types = []
     for finding in envelope.get("findings") or []:
@@ -172,7 +215,7 @@ def build_attestation(session: Any, envelope: dict, describe: dict,
         for entry in attested.get("evidence") or []:
             evidence.append(_render(entry, manifest))
 
-    return {
+    artifact = {
         "format": ATTESTATION_FORMAT,
         "target": target,
         "engine": {
@@ -197,6 +240,41 @@ def build_attestation(session: Any, envelope: dict, describe: dict,
                       or (describe.get("model") or {}).get(
                           "unconsumed_observations") or [])],
     }
+    if verdict is not None:
+        artifact["verdict"] = dict(verdict)
+    return artifact
+
+
+def verdict_block(exit_code: int, *, scored_by: str) -> dict:
+    """The producer's conclusion, in the core's vocabulary.
+
+    `scored_by` names who reached it and is required rather than defaulted: this
+    is a CLAIM by the producer, not a fact the core checked. The core asserts
+    only that the number is one of the three and that the word beside it is the
+    one that number means -- never that the number is right, which it has no
+    floor table to decide.
+    """
+    code, raw = exit_contract.normalise(exit_code)
+    block = {"exit_code": code, "meaning": exit_contract.MEANING[code],
+             "scored_by": str(scored_by)}
+    if raw != code:
+        # `normalise` hands back the raw value beside the mapped one precisely so
+        # a composer cannot clamp and forget. A leg that exited 137 is the most
+        # informative thing that run produced, and dropping it here would undo
+        # that in the one artifact a recipient keeps.
+        block["raw_exit_code"] = raw
+    return block
+
+
+def _own_key(value: Any) -> dict:
+    """The domain's own key beside the published one, or nothing.
+
+    See `vocabulary.record_key`. An attestation is the artifact a recipient
+    keeps, so it is the surface where one vertical's noun sitting on another
+    vertical's records lasts longest.
+    """
+    key = _vocabulary.record_key()
+    return {key: value} if key else {}
 
 
 def _boundary(evidence: list[dict]) -> str | None:
@@ -218,25 +296,82 @@ def _sensor(entity_id: str, manifest: Any) -> str:
     return entity_id
 
 
+def _statement(record: dict, manifest: Any) -> str | None:
+    """The domain's sentence for this record, or the engine's own word for it.
+
+    `manifest.translate_finding` used to be read as a bare attribute, so it was
+    REQUIRED -- by a writer whose `manifest` parameter is untyped, for a member
+    the Vocabulary protocol does not declare and no markdown file in this
+    repository mentions. A vertical passed the conformance kit green and then
+    raised `AttributeError` from the middle of an artifact it was halfway
+    through writing.
+
+    Degrading to the problem type is better than raising for the reason the
+    reporter gave: an attestation that cannot be written is worse than one whose
+    statements read like the engine, and a vertical writing its first `attest`
+    has no way to find out which member it owes.
+    """
+    translate = getattr(manifest, "translate_finding", None)
+    if callable(translate):
+        return translate(record)
+    return record.get("problem_type")
+
+
 def _finding(finding: dict, manifest: Any) -> dict:
-    return {"sensor": _sensor(finding.get("entity_id", "?"), manifest),
-            "entity_type": finding.get("entity_id"),
+    name = _sensor(finding.get("entity_id", "?"), manifest)
+    return {"sensor": name, **_own_key(name),
+            # THE ENGINE'S SENSE OF THE WORD, which is the envelope this record
+            # is built from. It held `entity_id` -- the manifest's sense, where
+            # `entity_type` is the sanitised identifier -- so the artifact
+            # carried an identifier under a name that says it is a class, one key
+            # away from the field `_sensor` exists to keep out of the artifact.
+            # Empty on findings from an engine that does not classify them, which
+            # is honest; the published name key carries it either way.
+            "entity_type": finding.get("entity_type"),
             "axiom": finding.get("axiom"),
             "severity": finding.get("severity"),
             "problem_type": finding.get("problem_type"),
-            "statement": manifest.translate_finding(finding)}
+            "statement": _statement(finding, manifest)}
+
+
+#: Decline keys the projection names itself. Everything else is measurement.
+_DECLINE_NAMED = ("entity_id", "entity_type", "indicator", "axiom", "reason", "detail")
 
 
 def _decline(decline: dict, manifest: Any) -> dict:
-    return {"sensor": _sensor(decline.get("entity_id", "?"), manifest),
-            "axiom": decline.get("axiom"),
-            "reason": decline.get("reason"),
-            "detail": decline.get("detail")}
+    """One declined evaluation, with the fields that make two of them two.
+
+    This kept FOUR keys of the thirteen a decline carries, and `indicator` was
+    among the nine it dropped -- so two indicators on one entity, both declining
+    for the same reason, became two identical rows, and a validated artifact
+    could not say which two things declined or that they were two rather than
+    one counted twice.
+
+    The rest go under `measurement` rather than into the top level, so the row
+    stays readable and a key the engine adds later arrives without a change
+    here. They are not incidental: `insufficient_samples` means the series will
+    fill OR that the collector's cadence can never reach the floor however long
+    it runs, and the engine says which in a field this used to drop -- a floor
+    of nothing against a floor of one, indistinguishable in the artifact.
+    """
+    measurement = {key: value for key, value in decline.items()
+                   if key not in _DECLINE_NAMED}
+    name = _sensor(decline.get("entity_id", "?"), manifest)
+    row = {"sensor": name, **_own_key(name),
+           "entity_type": decline.get("entity_type"),
+           "indicator": decline.get("indicator"),
+           "axiom": decline.get("axiom"),
+           "reason": decline.get("reason"),
+           "detail": decline.get("detail")}
+    if measurement:
+        row["measurement"] = measurement
+    return row
 
 
 def _render(entry: dict, manifest: Any) -> dict:
     inner = entry.get("evidence") or {}
-    return {"sensor": _sensor(entry.get("entity_id", "?"), manifest),
+    name = _sensor(entry.get("entity_id", "?"), manifest)
+    return {"sensor": name, **_own_key(name),
             "axiom": entry.get("axiom"),
             "problem_type": entry.get("problem_type"),
             "confidence": entry.get("confidence"),

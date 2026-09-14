@@ -429,7 +429,7 @@ def _generate(declaration: DeclarationSource, *, domain_id: str,
     """
     manifest = Manifest(domain_id=domain_id, expect_variation=expect_variation)
     # The vertical proposes peer groups; how it finds them is its business.
-    manifest.candidates = _vocabulary.current().peer_groups(declaration)
+    manifest.candidates = _vocabulary.member("peer_groups")(declaration)
     modelled_regardless: set[str] = set()
     if supplemental is not None:
         manifest.supplemental_source = supplemental.source

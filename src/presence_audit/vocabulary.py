@@ -96,7 +96,8 @@ class Vocabulary(Protocol):
     def capture_changes(self, before: object, after: object) -> Sequence[object]:
         """What changed about the capture as a whole."""
 
-    def capture_findings(self, capture: object) -> Sequence[object]:
+    def capture_findings(self, capture: object,
+                         *, declaration: object = None) -> Sequence[object]:
         """Findings only this domain can produce from its own capture.
 
         The diff pairs a declaration against a capture and reports what it
@@ -104,6 +105,14 @@ class Vocabulary(Protocol):
         two interfaces disagreeing about one point, say -- and those findings
         belong beside the diff's own rather than in a separate report nobody
         reads. A domain with nothing extra to say returns an empty sequence.
+
+        `declaration` is what the row was DECLARED as, and it is passed only to
+        a vocabulary whose signature accepts it. Without it a finding can only
+        be derived from the captured row, and a row that looks wrong on its own
+        terms may be a declared kind this audit does not judge -- a meeting
+        reported as an unowned deliverable, because nothing reachable from the
+        capture said it was a meeting. Taking it is OPTIONAL: every vertical
+        published before this takes the capture alone and keeps working.
         """
 
     def peer_groups(self, declaration: object) -> Sequence[Mapping[str, object]]:
@@ -145,6 +154,20 @@ class Vocabulary(Protocol):
         directly, so a vertical whose keys were called anything else had those
         counts silently missing from the text report while the JSON carried
         them.
+        """
+
+    def regression_kinds(self) -> Sequence[str]:
+        """Which of this domain's OWN finding and change kinds are regressions.
+
+        `capture_findings` and `point_changes` let a domain produce kinds only it
+        can see, and the exit code scored them against a frozen set of the core's
+        own -- so a vertical could put a real defect in the report and still
+        compose a clean verdict. The one fully worked vertical happened to emit a
+        kind the core already scored, which is why it took a second one to see.
+
+        OPTIONAL, and UNIONED with the core's set rather than replacing it: a
+        vocabulary may say which of its kinds count, and may not decide that a
+        point declared and absent does not.
         """
 
     def report_sections(self) -> Mapping[str, object]:
@@ -307,6 +330,31 @@ def current() -> Vocabulary:
     return supplied
 
 
+def member(name: str):
+    """A required member of the vocabulary in force, or a refusal naming it.
+
+    `current().<member>` raises a bare `AttributeError` from whichever call site
+    reached it first, so a vertical missing one learns an attribute name and
+    nothing about where the contract is written down or how to see the rest of
+    what it owes. Eleven call sites across four modules read a required member,
+    and every one of them reads it through here.
+
+    The three OPTIONAL members keep the accessors below, which fall back rather
+    than refuse. That asymmetry is the point and is now stated: a member the
+    protocol requires is a contract, and a member it offers is a courtesy.
+    """
+    supplied = current()
+    try:
+        return getattr(supplied, name)
+    except AttributeError:
+        raise PluginError(
+            f"the vocabulary in force declares no {name!r}, which the protocol "
+            f"lists as required. `python -m presence_audit.conformance <spec>` "
+            f"names every member it is missing in one pass, which is the "
+            f"answer an author needs -- this refusal can only name the one "
+            f"that was reached first") from None
+
+
 #: The noun the core falls back to. It is the word this module's own protocol
 #: uses in every docstring above, so a vertical that supplies nothing gets prose
 #: that is neutral and true rather than another domain's.
@@ -362,6 +410,49 @@ def count_labels() -> Mapping[str, tuple]:
             continue
         out[str(key)] = (str(label), str(note))
     return out
+
+
+def regression_kinds() -> frozenset:
+    """The domain's own regression kinds, or empty.
+
+    Defensive for the reason the other optional readers are: this is read while
+    scoring a report, and a vertical published before the member existed answers
+    nothing here and must keep composing a verdict.
+    """
+    supplied = getattr(_supplied(), "regression_kinds", None)
+    if supplied is None:
+        return frozenset()
+    try:
+        given = supplied() if callable(supplied) else supplied
+        if isinstance(given, (str, bytes)):
+            # A BARE STRING IS NOT A SEQUENCE OF KINDS, though Python will
+            # happily iterate one into single characters -- so a vocabulary
+            # naming its one regression kind without a comma would score every
+            # letter of it and none of its actual kinds, quietly and forever.
+            return frozenset()
+        return frozenset(str(kind) for kind in given)
+    except Exception:                                       # noqa: BLE001
+        return frozenset()
+
+
+def record_key(plural: bool = False) -> Optional[str]:
+    """The domain's own word for a record key, or None when it is the default.
+
+    None means *nothing to add*: the artifact keys were named after one domain
+    before this package was domain-free, and that vertical's own noun is the
+    word they were named after -- so for it this answers None and not one byte
+    of its output moves.
+
+    A key rather than a rename. "cert-generator" reads the published one out of
+    a finding and "bmc-sensor-audit" reads several more, so renaming would break
+    readers that are right to read what was published. Emitting the domain's key
+    BESIDE the published one lets a line audit key on its own word while
+    everything that already works keeps working -- the only shape that can land
+    without a compatibility break.
+    """
+    word = noun()[1 if plural else 0]
+    published = ("sensor", "sensors")[1 if plural else 0]
+    return None if word == published else word
 
 
 def registered() -> bool:
