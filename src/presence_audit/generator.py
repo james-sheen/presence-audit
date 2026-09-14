@@ -289,17 +289,20 @@ class Manifest:
         # the bound instead of asserting one.
         bound = {"critical": bounds[1], "warning": bounds[0]}.get(severity)
         if kind in COMPARISON_PROBLEMS:
-            # AT the bound is a breach and is not below it. Both comparisons are
-            # inclusive -- `current >= critical_threshold` on the ceiling and
-            # `current <= lower_critical` on the floor, read off the axiom -- and
-            # the axiom says why: *the threshold names the edge of acceptable,
-            # not the first unacceptable value*. This said BELOW and above, so a
-            # reading of exactly 0.0 against a declared floor of exactly 0.0 was
-            # rendered `is BELOW its lower critical bound of 0.0` and printed
-            # verbatim onto a QC certificate, where the measurement beside it
-            # read `value: 0.0, threshold: 0.0`. The verdict was right and the
-            # sentence was false; six sensors on one real board were affected,
-            # because QEMU reports exactly 0.0 for a tmp421 nobody has driven.
+            # AT the bound is a breach and is not below it. Both comparisons
+            # are inclusive -- `current >= critical_threshold` on the ceiling
+            # and `current <= lower_critical` on the floor, read off the axiom
+            # -- and the axiom says why: *the threshold names the edge of
+            # acceptable, not the first unacceptable value*. This said BELOW and
+            # above regardless, so a point reading exactly 0.0 against a
+            # declared floor of exactly 0.0 was rendered `is BELOW its lower
+            # critical bound of 0.0`, and a downstream artifact printed that
+            # sentence beside its own measurement of `value: 0.0, threshold:
+            # 0.0`. The verdict was right and the sentence was false, on a
+            # document whose entire job is to be believed about one unit. Six
+            # points in one real run were affected: a domain that declares a
+            # floor at zero and a target that reports exactly zero is not an
+            # unusual pairing, it is the untouched case.
             direction = ("at or BELOW its lower" if side == "lower"
                          else "at or above its upper")
         else:
@@ -312,12 +315,12 @@ class Manifest:
             # *trending toward critical limit* -- is the accurate sentence.
             #
             # Not corrected here, and the reason is release order rather than
-            # doubt. `bmc-sensor-audit` asserts that every ceiling-side finding
+            # doubt. A shipped vertical asserts that every ceiling-side finding
             # reads as *above*, parametrised over `approaching_limit`, against
-            # whatever version of this package is installed. Changing the wording
-            # now plants a failure in another repository's CI that fires whenever
-            # this package next releases, which is a worse defect than the one it
-            # fixes. The pair has to move together.
+            # whatever version of this package its environment installed.
+            # Changing the wording now plants a failure in another repository's
+            # CI that fires whenever this package next releases, which is a
+            # worse defect than the one it fixes. The pair has to move together.
             direction = "BELOW its lower" if side == "lower" else "above its upper"
         text = f"{sensor.declared_name} is {direction} {severity} bound"
         return text + (f" of {bound}" if bound is not None else "")
