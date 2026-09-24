@@ -179,6 +179,14 @@ reading a missing key as *unsupported* rather than *empty* is the same mistake
 as reading *absent* for *not reading*. A vertical whose own pin excludes those
 engines is free to be stricter, and one is.
 
+**Two engine constants are RESTATED here, and they are not the same risk.**
+`DEFAULT_TOLERANCE` is a default: if it drifts, a number moves. `RESPONSE_MODELS`
+is a closed enum, and a drifted copy refuses a value the engine accepts or accepts
+one it does not — so it is guarded. The restatement is re-derived from the engine's
+own enum wherever the engine happens to be installed, and skips with a reason where
+it is not. The first draft of that tuple was written from memory and was wrong in
+both directions at once, which is why it is checked rather than trusted.
+
 **There is no `arbiter-engine` dependency here, and there will not be one.**
 Nothing in this package imports the engine: `feed(session, ...)` takes whatever
 the caller built, and the envelope comes back as a plain dict. Declaring the

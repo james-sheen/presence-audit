@@ -72,6 +72,18 @@ __all__ = ["GeneratedSensor", "Manifest", "generate", "BOUND_OF_PROBLEM",
            "COMPARISON_PROBLEMS", "peer_property", "PEER_PREFIX"]
 
 READING = "reading"
+
+#: The relationship type a declared coupling becomes. Deliberately a neutral verb:
+#: this module cannot see the domain, and a domain's own word here would be a
+#: statement about every other domain that is false.
+COUPLING_RELATION = "drives"
+
+#: The projector put on a coupling's DRIVER. A rollout that lets the world drift
+#: needs one or it completes nought steps, declining `model_missing` -- measured. It
+#: is a local level rather than a random walk because a measured value is usually a
+#: level observed with noise; where the series does not support that, the engine
+#: declines `unidentifiable_parameter` by name rather than fitting something wrong.
+DRIVER_DYNAMICS = "local_level"
 WINDOW = "15m"
 
 # Which side of the band each BOUNDEDNESS finding speaks about, derived by running
@@ -179,6 +191,12 @@ class Manifest:
     # `pairing_candidates` for why these are not pairings.
     candidates: list[dict] = field(default_factory=list)
     supplemental_source: str | None = None
+    #: Couplings that became relationship rules, as (driver, driven) DISPLAY names.
+    coupled: list[tuple[str, str]] = field(default_factory=list)
+    #: And every one that did not, with the reason. NEVER SILENT: a coupling whose
+    #: endpoint was excluded leaves a file declaring a chain the model does not
+    #: contain, and a rollout that reports nothing because it was asked nothing.
+    uncoupled: list[dict] = field(default_factory=list)
 
     def exclude(self, reason: str, sensor: DeclaredPoint) -> None:
         self.excluded.setdefault(reason, []).append(sensor.display_name)
@@ -191,7 +209,9 @@ class Manifest:
                   "redundant_groups": sum(1 for s in self.sensors if s.agrees_with),
                   "counters": sum(1 for s in self.sensors if s.counter),
                   "flows": sum(1 for s in self.sensors if s.flow_outputs),
-                  "pairing_candidates": len(self.candidates)}
+                  "pairing_candidates": len(self.candidates),
+                  "couplings": len(self.coupled),
+                  "couplings_not_expressed": len(self.uncoupled)}
         for reason, names in self.excluded.items():
             counts[f"excluded_{reason}"] = len(names)
         return counts
@@ -215,6 +235,8 @@ class Manifest:
             "supplemental_source": (Path(self.supplemental_source).name
                                     if self.supplemental_source else None),
             "counts": self.counts(),
+            "coupled": [list(pair) for pair in self.coupled],
+            "uncoupled": list(self.uncoupled),
             "sensors": [{"entity_type": s.entity_type,
                          "declared_name": s.declared_name,
                          "source": Path(s.source).name if s.source else None,
@@ -526,6 +548,54 @@ def _generate(declaration: DeclarationSource, *, domain_id: str,
             counter=counter.direction if counter is not None else None,
             flow_outputs=tuple(flow.outputs) if flow is not None else ()))
 
+    # ---- couplings -> relationship rules ------------------------------------
+    #
+    # The vertical states WHICH reading drives which, in the names a person reads;
+    # the engine needs entity types, which are the sanitised forms generated above.
+    # That map is already in the manifest, so the translation is a lookup rather
+    # than a second naming convention.
+    #
+    # ONE RELATIONSHIP TYPE, and it is a neutral word. A domain's own verb here
+    # would be this file asserting something about a domain it cannot see.
+    relationship_types: list[str] = []
+    relationship_rules: list[dict] = []
+    if supplemental is not None and supplemental.couplings:
+        by_name = {s.declared_name: s.entity_type for s in manifest.sensors}
+        for coupling in supplemental.couplings:
+            missing = [n for n in coupling.members if n not in by_name]
+            if missing:
+                # Reported, not dropped. The endpoint was excluded for a reason
+                # this manifest already records, and the coupling naming it is now
+                # a declaration with nothing behind it.
+                manifest.uncoupled.append(
+                    {"from": coupling.source, "to": coupling.target,
+                     "reason": "endpoint_not_modelled", "missing": missing})
+                continue
+            if COUPLING_RELATION not in relationship_types:
+                relationship_types.append(COUPLING_RELATION)
+            transition = {"from": READING, "to": READING,
+                          "source": coupling.gain_basis or coupling.basis}
+            transition["gain"] = coupling.gain
+            relationship_rules.append({
+                "type": COUPLING_RELATION,
+                "source_type": by_name[coupling.source],
+                "target_type": by_name[coupling.target],
+                "temporal": {
+                    "propagation_delay_s": coupling.propagation_delay_s,
+                    "time_constant_s": coupling.time_constant_s,
+                    "response_model": coupling.response_model},
+                "transition": transition})
+            manifest.coupled.append((coupling.source, coupling.target))
+            # A PROJECTOR ON THE DRIVER, because without one a rollout that lets
+            # the world drift has nothing to drift it with: the engine declines
+            # `model_missing` and completes nought steps. Measured. Recorded in the
+            # manifest rather than applied quietly, because it gives that indicator
+            # a behaviour the declaration did not ask for.
+            driver_type = by_name[coupling.source]
+            for spec in indicators.get(driver_type, []):
+                if spec.get("name") == READING and "dynamics" not in spec:
+                    spec["dynamics"] = {"model": DRIVER_DYNAMICS}
+
     model = {"domain": {"id": domain_id,
                         # The generated model's own name, which travels with it
                         # into the engine and into every report built from it.
@@ -533,4 +603,7 @@ def _generate(declaration: DeclarationSource, *, domain_id: str,
                         "name": "Generated from declarations",
                         "entity_types": entity_types,
                         "indicators": indicators}}
+    if relationship_rules:
+        model["domain"]["relationship_types"] = relationship_types
+        model["domain"]["relationship_rules"] = relationship_rules
     return model, manifest

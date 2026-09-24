@@ -23,6 +23,28 @@ that looks like the feature working.
 error counters mostly live outside `entity-manager` altogether, so which readings are
 cumulative is also operator knowledge.
 
+**Couplings.** The engine can step a model forward through declared dynamics -- what
+drives what, how long the change takes to arrive, how fast it settles -- and nothing in
+a declaration says that one reading moves another. Two points that drive one another
+are two independent entries to every format that lists them; which of them moves which
+is a fact about the installation, not about the file. So a coupling is the same kind of
+operator sentence as a pairing, and gets the same treatment.
+
+**Its gain is a specification too, and usually nobody has one.** A coupling may state
+`gain` as a number with a `gain_basis` -- a datasheet coefficient, a commissioning
+measurement -- or as the string `estimate`, which declares the coupling and withholds
+the number. The engine then fits it from history and reports it with its `n`, its
+`r_squared` and an interval, and **projects nothing until a human writes a number
+down**. Withholding is the honest default; inventing a coefficient to make a
+simulation run would put a guess where this format's whole purpose is to refuse one.
+
+**`sampling_interval_s` is required once a coupling is declared, and this was
+MEASURED rather than reasoned.** The fit aligns the two series on a shared grid, so a
+`propagation_delay_s` that is not a multiple of the collection cadence can align no
+pair of readings at all: the engine declines `delay_off_grid` and the coupling
+contributes nothing, from a file that looks correct. Refusing it here turns a silent
+later decline into a load-time error naming the arithmetic.
+
 **Flows.** CONSERVATION checks that what goes into a device comes out of it, minus a
 tolerated loss. `entity-manager` does declare the readings -- the pinned Ampere
 Mt.Jade configuration exposes `PSU0_PINPUT` and `PSU0_POUTPUT` -- but nothing in the
@@ -48,6 +70,13 @@ modelled whether or not it has bounds.
       "counters": [
         {"sensor": "PWR_ON_HOURS", "direction": "increasing", "allow_reset": true,
          "basis": "why this only climbs"}
+      ],
+      "sampling_interval_s": 300,
+      "couplings": [
+        {"from": "DRIVER_POINT", "to": "DRIVEN_POINT",
+         "propagation_delay_s": 300, "time_constant_s": 600,
+         "gain": "estimate",
+         "basis": "why the first drives the second"}
       ]
     }
 
@@ -71,8 +100,9 @@ from pathlib import Path
 from . import vocabulary as _vocabulary
 
 __all__ = ["ACCEPTED_FORMATS",
-           "Supplemental", "RedundantGroup", "Counter", "load_supplemental",
-           "SupplementalError", "FORMAT"]
+           "Supplemental", "RedundantGroup", "Counter", "Coupling",
+           "load_supplemental", "SupplementalError", "FORMAT",
+           "RESPONSE_MODELS", "ESTIMATE"]
 
 FORMAT = "presence-audit/supplemental/1"
 
@@ -86,6 +116,22 @@ ACCEPTED_FORMATS = (FORMAT, "bmc-sensor-audit/supplemental/1")
 DEFAULT_TOLERANCE = 0.05
 
 _DIRECTIONS = ("increasing", "decreasing")
+
+#: The time courses the engine knows. Restated rather than imported for the reason
+#: `DEFAULT_TOLERANCE` is: Stage 1 must not import the engine.
+#:
+#: **A RESTATED CLOSED ENUM IS NOT A RESTATED DEFAULT, and this one is guarded.** A
+#: default that drifts moves a number; a member list that drifts refuses a value the
+#: engine accepts, or accepts one it does not. The first draft of this line was
+#: written from memory and got it wrong in two directions at once -- it invented
+#: `immediate`, which the engine has never had, and omitted `step` and `logarithmic`,
+#: which it has. `test_the_response_models_are_the_engine's` re-derives this tuple
+#: from the engine wherever the engine is installed, and skips with a reason where it
+#: is not.
+RESPONSE_MODELS = ("exponential", "linear", "step", "logarithmic")
+
+#: A gain declared as withheld. The coupling is stated; the number is not.
+ESTIMATE = "estimate"
 
 
 class SupplementalError(ValueError):
@@ -137,6 +183,34 @@ class Flow:
         return (self.input,) + self.outputs
 
 
+@dataclass(frozen=True)
+class Coupling:
+    """One reading drives another, and how long it takes to arrive.
+
+    `gain` is either a float or `ESTIMATE`. The two are not interchangeable: a
+    number projects, and a withheld one declares the coupling and leaves the
+    engine reporting a fit nobody has adopted. Which of those a file states is
+    the operator's claim about whether anybody has measured it.
+    """
+
+    source: str
+    target: str
+    basis: str
+    propagation_delay_s: float
+    time_constant_s: float
+    response_model: str = "exponential"
+    gain: float | str = ESTIMATE
+    gain_basis: str | None = None
+
+    @property
+    def gain_is_withheld(self) -> bool:
+        return isinstance(self.gain, str)
+
+    @property
+    def members(self) -> tuple[str, ...]:
+        return (self.source, self.target)
+
+
 @dataclass
 class Supplemental:
     """Operator declarations, and the file they came from."""
@@ -146,9 +220,15 @@ class Supplemental:
     redundant_groups: list[RedundantGroup] = field(default_factory=list)
     counters: list[Counter] = field(default_factory=list)
     flows: list[Flow] = field(default_factory=list)
+    couplings: list[Coupling] = field(default_factory=list)
+    #: The cadence the collector reads at. Required once a coupling is
+    #: declared, because a delay that does not divide it can align no
+    #: pair of readings -- see the module docstring.
+    sampling_interval_s: float | None = None
 
     def __bool__(self) -> bool:
-        return bool(self.redundant_groups or self.counters or self.flows)
+        return bool(self.redundant_groups or self.counters or self.flows
+                    or self.couplings)
 
     def flow_for(self, display_name: str) -> Flow | None:
         """The flow this point is the INPUT of, if any. The outputs are carried as
@@ -166,7 +246,13 @@ class Supplemental:
         exclusion rule would drop them, leaving a declared conservation check that
         silently never runs.
         """
-        return {name for flow in self.flows for name in flow.members}
+        names = {name for flow in self.flows for name in flow.members}
+        # A COUPLED POINT IS THE SAME CASE. A fan tachometer routinely carries no
+        # thresholds -- no speed is a fault on its own -- so the ordinary exclusion
+        # rule drops it, and a coupling naming it would then reference an entity
+        # type the model does not contain. Naming a point in a coupling is what
+        # asks the question, exactly as naming one in a flow is.
+        return names | {name for c in self.couplings for name in c.members}
 
     def group_for(self, display_name: str) -> RedundantGroup | None:
         """The group this point leads, if it leads one."""
@@ -189,6 +275,7 @@ class Supplemental:
         declaration."""
         named = {s for group in self.redundant_groups for s in group.sensors}
         named |= {name for flow in self.flows for name in flow.members}
+        named |= {name for c in self.couplings for name in c.members}
         return named | {c.sensor for c in self.counters}
 
 
@@ -309,6 +396,94 @@ def load_supplemental(path: str | Path) -> Supplemental:
             outputs=tuple(str(o) for o in outputs),
             basis=str(_require(block, "basis", where)),
             loss_margin=None if margin is None else float(margin)))
+
+    interval = raw.get("sampling_interval_s")
+    if interval is not None:
+        interval = float(interval)
+        if interval <= 0:
+            raise SupplementalError(
+                f"{path}: sampling_interval_s is {interval!r}; it is the cadence "
+                f"the collector walks at, so it has to be a positive number of "
+                f"seconds")
+        result.sampling_interval_s = interval
+
+    for index, block in enumerate(raw.get("couplings") or []):
+        where = f"{path}: couplings[{index}]"
+        if not isinstance(block, dict):
+            raise SupplementalError(f"{where} is not an object")
+        driver = str(_require(block, "from", where))
+        driven = str(_require(block, "to", where))
+        if driver == driven:
+            raise SupplementalError(
+                f"{where} names {driver!r} as both ends; a reading cannot be "
+                f"evidence about how it drives itself, and the fit would be a "
+                f"series regressed on a lagged copy of itself")
+        delay = float(_require(block, "propagation_delay_s", where))
+        constant = float(_require(block, "time_constant_s", where))
+        if delay < 0 or constant <= 0:
+            raise SupplementalError(
+                f"{where} declares propagation_delay_s={delay!r} and "
+                f"time_constant_s={constant!r}; the delay may be zero and the "
+                f"time constant may not, because a settling time of nought is a "
+                f"step and is spelled response_model: step")
+
+        # THE GRID CHECK, and it exists because the alternative is silence. The
+        # engine aligns the two series on their shared sampling grid; a delay that
+        # is not a whole number of steps can align no pair of readings, so the
+        # coupling declines `delay_off_grid` and contributes nothing -- from a
+        # file that reads as correct. Measured before this was written.
+        if interval is None:
+            raise SupplementalError(
+                f"{where} declares a coupling and this file states no "
+                f"sampling_interval_s. The delay has to be a whole number of "
+                f"collection steps or no pair of readings can be aligned, and "
+                f"that cannot be checked without the cadence")
+        steps = delay / interval
+        if abs(steps - round(steps)) > 1e-9:
+            raise SupplementalError(
+                f"{where} declares propagation_delay_s={delay:g} against a "
+                f"sampling_interval_s of {interval:g}, which is {steps:.4g} "
+                f"collection steps. A delay that does not land on the grid aligns "
+                f"no pair of readings: the engine would decline and this file "
+                f"would look correct. Use a multiple of {interval:g}")
+
+        model = str(block.get("response_model") or "exponential")
+        if model not in RESPONSE_MODELS:
+            raise SupplementalError(
+                f"{where} declares response_model {model!r}; this build knows "
+                f"{list(RESPONSE_MODELS)}")
+
+        gain = block.get("gain", ESTIMATE)
+        gain_basis = block.get("gain_basis")
+        if isinstance(gain, str):
+            if gain != ESTIMATE:
+                raise SupplementalError(
+                    f"{where} declares gain {gain!r}; a gain is a number, or the "
+                    f"word {ESTIMATE!r} to declare the coupling and withhold it")
+            if gain_basis:
+                raise SupplementalError(
+                    f"{where} withholds the gain and also states a gain_basis. "
+                    f"One of those is wrong: a basis is what establishes a "
+                    f"number, and there is no number here")
+        else:
+            gain = float(gain)
+            if gain == 0:
+                raise SupplementalError(
+                    f"{where} declares gain 0; that is the claim that the first "
+                    f"reading does not drive the second, which is what NOT "
+                    f"declaring the coupling already says")
+            if not str(gain_basis or "").strip():
+                raise SupplementalError(
+                    f"{where} states a gain and no gain_basis. A coefficient "
+                    f"with nothing establishing it is the guess this file exists "
+                    f"to refuse; withhold it with gain: {ESTIMATE!r} instead")
+
+        result.couplings.append(Coupling(
+            source=driver, target=driven,
+            basis=str(_require(block, "basis", where)),
+            propagation_delay_s=delay, time_constant_s=constant,
+            response_model=model, gain=gain,
+            gain_basis=None if gain_basis is None else str(gain_basis)))
 
     for index, block in enumerate(raw.get("counters") or []):
         where = f"{path}: counters[{index}]"
