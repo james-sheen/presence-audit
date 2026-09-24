@@ -61,7 +61,7 @@ modelled whether or not it has bounds.
 ## The file
 
     {
-      "format": "presence-audit/supplemental/1",
+      "format": "presence-audit/supplemental/2",
       "provenance": "who established this and how",
       "redundant_groups": [
         {"sensors": ["A", "B"], "tolerance": 0.05,
@@ -99,16 +99,40 @@ from pathlib import Path
 
 from . import vocabulary as _vocabulary
 
-__all__ = ["ACCEPTED_FORMATS",
+__all__ = ["ACCEPTED_FORMATS", "FORMATS_WITHOUT_COUPLINGS",
            "Supplemental", "RedundantGroup", "Counter", "Coupling",
            "load_supplemental", "SupplementalError", "FORMAT",
            "RESPONSE_MODELS", "ESTIMATE"]
 
-FORMAT = "presence-audit/supplemental/1"
+FORMAT = "presence-audit/supplemental/2"
 
-#: Accepted on read, newest first. Same argument as the attestation format: the
-#: shape is unchanged, so a file written before the move is still this document.
-ACCEPTED_FORMATS = (FORMAT, "bmc-sensor-audit/supplemental/1")
+#: Accepted on read, newest first. The earlier ids are still read: their shape is a
+#: SUBSET of this one, so a file written before the move is still this document.
+#:
+#: **/2 EXISTS BECAUSE A NEW BLOCK IN /1 IS INVISIBLE TO AN OLDER READER, AND THAT
+#: WAS MEASURED.** `couplings:` was added to /1 first. A build without it read such
+#: a file, loaded it WITHOUT ERROR, dropped the couplings, and reported the whole
+#: file as empty -- so an operator who declared one would get a clean run in which
+#: nothing they wrote was read. That is the exact failure the first paragraph of
+#: this module refuses for a malformed entry, arriving through the version skew
+#: instead.
+#:
+#: A reader cannot be taught to notice a key it has never heard of, so the notice
+#: has to be in the one field every reader already checks. A file declaring
+#: `couplings:` must therefore declare /2, and `load_supplemental` refuses the
+#: combination of /1 and a coupling by name rather than accepting a document an
+#: older build would read differently.
+#:
+#: The size of this set is pinned by a test so a third name cannot appear without
+#: somebody saying why. This is that saying-why.
+ACCEPTED_FORMATS = (FORMAT, "presence-audit/supplemental/1",
+                    "bmc-sensor-audit/supplemental/1")
+
+#: The ids that predate `couplings:`. A file naming one of these and declaring a
+#: coupling is refused: the declaration would be silently invisible to any build
+#: that still reads only those.
+FORMATS_WITHOUT_COUPLINGS = ("presence-audit/supplemental/1",
+                             "bmc-sensor-audit/supplemental/1")
 
 # The engine's own default is 0.05 relative. Restated rather than imported because
 # Stage 1 must not import the engine, and a default that silently tracked an upstream
@@ -406,6 +430,14 @@ def load_supplemental(path: str | Path) -> Supplemental:
                 f"the collector walks at, so it has to be a positive number of "
                 f"seconds")
         result.sampling_interval_s = interval
+
+    if raw.get("couplings") and declared_format in FORMATS_WITHOUT_COUPLINGS:
+        raise SupplementalError(
+            f"{path}: declares couplings under format {declared_format!r}, which "
+            f"predates them. A build reading only that format loads this file "
+            f"without error, drops the couplings and reports the file as empty -- "
+            f"so the declaration would be invisible rather than refused. Declare "
+            f"format {FORMAT!r}, which such a build refuses by name")
 
     for index, block in enumerate(raw.get("couplings") or []):
         where = f"{path}: couplings[{index}]"

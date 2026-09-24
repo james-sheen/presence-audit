@@ -203,9 +203,19 @@ and both look like wording.
 
 **The three states.** *Reading*, *present but not reading* and *absent* are keys
 in a published format that two distributions already read, and the set of format
-ids this package accepts is pinned at exactly two so a third cannot appear
-without somebody saying why. Renaming a state reads like a lexical improvement
-and is a wire-contract break.
+ids this package accepts is pinned by SIZE so a name cannot appear without
+somebody saying why. Renaming a state reads like a lexical improvement and is a
+wire-contract break.
+
+**The supplemental set went to three, and this is the saying-why.**
+`presence-audit/supplemental/2` was cut because a new block in `/1` is invisible
+to a build that predates it — measured: such a build loads the file without
+error, drops the block, and reports the file as empty, so an operator who
+declared a coupling would get a clean run in which nothing they wrote was read.
+A reader cannot be taught to notice a key it has never heard of, so the notice
+goes in the one field every reader already checks. Both earlier ids are still
+read, because their shape is a subset; a file combining one of them with a
+coupling is refused by name.
 
 **The keys that still carry another domain's word.** Some keys in the report and
 in the supplemental file are named after the domain this package was extracted

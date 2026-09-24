@@ -32,7 +32,19 @@ class TestTheEmittedNameIsTheNewOne:
         assert attestation.ATTESTATION_FORMAT == "presence-audit/attestation/1"
 
     def test_supplemental(self):
-        assert supplemental.FORMAT == "presence-audit/supplemental/1"
+        """The claim of this class is the OWNER, not the version.
+
+        It pinned `presence-audit/supplemental/1` outright, so cutting `/2` reddened
+        a test whose subject is that the emitted name is this package's own rather
+        than the domain it was extracted from. Pinned on the prefix now, plus the
+        absence of the old name -- which is the sentence the class is titled for and
+        survives every later version.
+        """
+        assert supplemental.FORMAT.startswith("presence-audit/supplemental/")
+        assert supplemental.FORMAT != OLD_SUPPLEMENTAL
+        assert supplemental.FORMAT == supplemental.ACCEPTED_FORMATS[0], (
+            "the emitted name is not the newest accepted one; a reader taking the "
+            "head of that tuple as current would be wrong")
 
     def test_the_documented_example_shows_what_is_emitted(self):
         """A docstring showing the old name reads as current and outlives the
@@ -88,8 +100,18 @@ class TestAnUnknownNameIsStillRefused:
         with pytest.raises(supplemental.SupplementalError):
             supplemental.load_supplemental(str(p))
 
-    def test_the_accepted_sets_are_exactly_two_each(self):
-        """A pin on the SIZE, so a third name cannot be added without this
-        failing and somebody having to say why it is there."""
+    def test_the_accepted_sets_are_pinned_by_size(self):
+        """A pin on the SIZE, so a name cannot be added without this failing and
+        somebody having to say why it is there.
+
+        THE SUPPLEMENTAL SET WENT TO THREE, AND THIS IS THE SAYING-WHY. `/2` was
+        cut because `couplings:` in `/1` is INVISIBLE to a build that predates it:
+        measured, such a build loads the file without error, drops the block and
+        reports the file as empty, so an operator who declared a coupling would
+        get a clean run in which nothing they wrote was read. A reader cannot be
+        taught to notice a key it has never heard of, so the notice goes in the
+        one field every reader already checks. `/1` is still read, because its
+        shape is a subset; a file combining `/1` with a coupling is refused.
+        """
         assert len(attestation.ACCEPTED_ATTESTATION_FORMATS) == 2
-        assert len(supplemental.ACCEPTED_FORMATS) == 2
+        assert len(supplemental.ACCEPTED_FORMATS) == 3

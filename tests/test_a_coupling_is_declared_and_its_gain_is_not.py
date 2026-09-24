@@ -36,7 +36,9 @@ from pathlib import Path
 import pytest
 
 from presence_audit import conformance, generator
-from presence_audit.supplemental import (ESTIMATE, RESPONSE_MODELS, Coupling,
+from presence_audit.supplemental import (ESTIMATE, FORMAT,
+                                         FORMATS_WITHOUT_COUPLINGS,
+                                         RESPONSE_MODELS, Coupling,
                                          Supplemental, SupplementalError,
                                          load_supplemental, unmatched_names)
 
@@ -87,7 +89,7 @@ INTERVAL = 300
 
 
 def _file(**overrides) -> Path:
-    doc = {"format": "presence-audit/supplemental/1", "provenance": "a bench",
+    doc = {"format": FORMAT, "provenance": "a bench",
            "sampling_interval_s": INTERVAL, "couplings": [dict(WHOLE)]}
     doc.update(overrides)
     path = Path(tempfile.mkdtemp()) / "supplemental.json"
@@ -153,7 +155,7 @@ class TestTheFileIsReadStrictly:
     def test_a_coupling_without_a_cadence_is_refused(self):
         """The grid cannot be checked without it, and an unchecked delay is the
         silent case this whole constraint exists for."""
-        doc = {"format": "presence-audit/supplemental/1", "provenance": "a bench",
+        doc = {"format": FORMAT, "provenance": "a bench",
                "couplings": [dict(WHOLE)]}
         path = Path(tempfile.mkdtemp()) / "s.json"
         path.write_text(json.dumps(doc), encoding="utf-8")
@@ -354,3 +356,36 @@ class TestTheShapeItself:
         assert bool(Supplemental(couplings=[
             Coupling(source="A", target="B", basis="b",
                      propagation_delay_s=0, time_constant_s=1)]))
+
+
+class TestAnOlderReaderIsTOLDRatherThanLeftToIgnoreIt:
+    """The version-skew half, and it was found by asking what a build WITHOUT this
+    change does with a file that has it.
+
+    Measured on such a build: the file loads without error, the couplings are
+    dropped, and `bool(supplemental)` is False -- so the caller reports no
+    declarations at all. An operator gets a clean run in which nothing they wrote
+    was read, which is the failure this module's first paragraph refuses for a
+    malformed entry, arriving through the version skew instead.
+    """
+
+    @pytest.mark.parametrize("older", FORMATS_WITHOUT_COUPLINGS)
+    def test_a_coupling_under_an_older_format_is_refused(self, older):
+        with pytest.raises(SupplementalError) as raised:
+            load_supplemental(_file(format=older))
+        assert FORMAT in str(raised.value), (
+            "the refusal does not name the format to use instead")
+
+    @pytest.mark.parametrize("older", FORMATS_WITHOUT_COUPLINGS)
+    def test_those_formats_still_read_everything_they_ever_did(self, older):
+        """The bump must not retire them. Their shape is a subset of this one and
+        a file written before it is still this document."""
+        loaded = load_supplemental(_file(format=older, couplings=[],
+                                          counters=[{"sensor": "C",
+                                                     "basis": "it climbs"}]))
+        assert [c.sensor for c in loaded.counters] == ["C"]
+
+    def test_the_current_format_is_the_one_couplings_need(self):
+        assert FORMAT not in FORMATS_WITHOUT_COUPLINGS
+        assert load_supplemental(_file()).couplings
+
