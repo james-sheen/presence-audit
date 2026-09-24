@@ -171,8 +171,14 @@ class TestTheFileIsReadStrictly:
         assert "1.5" in message, "the quotient is not shown"
 
     def test_a_delay_of_zero_is_allowed(self):
-        """Nought steps IS on the grid. The engine has an immediate response model
-        and a coupling with no transport lag is a real thing."""
+        """Nought steps IS on the grid, and a coupling with no transport lag is a
+        real thing -- the engine's `step` response model is exactly that shape.
+
+        The sentence here said the engine has an *immediate* response model. It
+        does not and never has; that word is a leftover from the draft of
+        `RESPONSE_MODELS` that was written from memory, and it survived into a
+        docstring one line below the parametrised case that uses the same word as
+        an example of something the engine REFUSES."""
         assert load_supplemental(_with(propagation_delay_s=0)).couplings
 
 
@@ -301,22 +307,39 @@ class TestATypoIsCaughtByTheMechanismThatAlreadyExists:
         assert {DRIVER, DRIVEN} <= loaded.names()
 
 
-class TestTheRestatedEnumIsTheEngines:
+class TestTheRestatedEnumIsWellFormed:
     """A restated DEFAULT drifts a number; a restated CLOSED ENUM refuses a value
-    the engine accepts, or accepts one it does not.
+    the engine accepts, or accepts one it does not. So it has to be checked.
 
-    Stage 1 must not import the engine, so this tuple cannot be derived at runtime
-    -- but it can be checked wherever the engine happens to be installed, which is
-    every environment that runs the bridge.
+    **AND IT CANNOT BE CHECKED HERE.** Stage 1 does not import the engine and will
+    not depend on it, so the comparison needs an environment this package refuses
+    to require. The first version of this reached for `importorskip` -- and this
+    repository's CI fails on ANY skip, for a reason it states: a skip means the
+    test that adapts a really published implementation went unrun, and its absence
+    is invisible in a green run. A guard that goes quiet where it matters is worse
+    than one that lives somewhere else.
+
+    So what runs here is the half that can: the tuple is a closed set of distinct
+    non-empty strings, which catches a fat-fingered edit. **The comparison against
+    the engine's own enum belongs in a vertical**, which is where the engine pin
+    already lives -- this package's README gives that as the reason the pin is not
+    here either.
     """
 
-    def test_the_response_models_are_the_engines(self):
-        edge = pytest.importorskip(
-            "arbiter_engine.temporal.temporal_edge",
-            reason="the engine is not installed here; Stage 1 does not require it")
-        assert set(RESPONSE_MODELS) == {m.value for m in edge.ResponseModel}, (
-            "this package's restatement of the engine's response models has "
-            "drifted from the engine's own enum")
+    def test_it_is_a_closed_set_of_distinct_names(self):
+        assert RESPONSE_MODELS, "the restatement is empty; nothing would validate"
+        assert len(set(RESPONSE_MODELS)) == len(RESPONSE_MODELS), RESPONSE_MODELS
+        assert all(isinstance(m, str) and m.strip() for m in RESPONSE_MODELS)
+
+    def test_the_loader_accepts_exactly_those_and_no_others(self):
+        """The set is not decoration: it is what the loader admits. Checked
+        against the loader rather than asserted, so a member added to the tuple
+        and not reaching the check would be caught."""
+        for model in RESPONSE_MODELS:
+            assert load_supplemental(
+                _with(response_model=model)).couplings[0].response_model == model
+        with pytest.raises(SupplementalError):
+            load_supplemental(_with(response_model="not_a_response_model"))
 
 
 class TestTheShapeItself:
