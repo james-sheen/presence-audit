@@ -99,7 +99,7 @@ from pathlib import Path
 
 from . import vocabulary as _vocabulary
 
-__all__ = ["ACCEPTED_FORMATS", "FORMATS_WITHOUT_COUPLINGS",
+__all__ = ["ACCEPTED_FORMATS", "KEYS_BY_FORMAT",
            "Supplemental", "RedundantGroup", "Counter", "Coupling",
            "load_supplemental", "SupplementalError", "FORMAT",
            "RESPONSE_MODELS", "ESTIMATE"]
@@ -128,11 +128,34 @@ FORMAT = "presence-audit/supplemental/2"
 ACCEPTED_FORMATS = (FORMAT, "presence-audit/supplemental/1",
                     "bmc-sensor-audit/supplemental/1")
 
-#: The ids that predate `couplings:`. A file naming one of these and declaring a
-#: coupling is refused: the declaration would be silently invisible to any build
-#: that still reads only those.
-FORMATS_WITHOUT_COUPLINGS = ("presence-audit/supplemental/1",
-                             "bmc-sensor-audit/supplemental/1")
+#: WHAT EACH FORMAT CARRIES, and the mechanism that makes the next block visible.
+#:
+#: The defect this closes is one a format bump fixes for a single instance and not
+#: for the class: a reader IGNORES what it does not recognise, so any block added
+#: to an id that is already published is invisible to every build already out
+#: there -- the file loads, the block vanishes, and the run reports nothing.
+#: Measured, exactly that, on `couplings:` before this existed.
+#:
+#: **A reader cannot be taught a key it has never heard of, but it CAN be taught
+#: to refuse a key it does not know.** That is the general form, and it is the one
+#: thing that works without foresight: every build shipped from here on rejects a
+#: document carrying anything it cannot read, so the NEXT block added to a
+#: published id is loud on arrival rather than silent.
+#:
+#: It is FORWARD-ONLY, and saying so is the point. A build already released cannot
+#: learn this. Those are what the format id protects: a key declared under a
+#: later id makes an older build refuse the whole document by a check it already
+#: has. The two mechanisms cover different populations and neither replaces the
+#: other.
+KEYS_BY_FORMAT = {
+    "bmc-sensor-audit/supplemental/1": frozenset({
+        "format", "provenance", "redundant_groups", "counters", "flows"}),
+    "presence-audit/supplemental/1": frozenset({
+        "format", "provenance", "redundant_groups", "counters", "flows"}),
+    "presence-audit/supplemental/2": frozenset({
+        "format", "provenance", "redundant_groups", "counters", "flows",
+        "couplings", "sampling_interval_s"}),
+}
 
 # The engine's own default is 0.05 relative. Restated rather than imported because
 # Stage 1 must not import the engine, and a default that silently tracked an upstream
@@ -363,6 +386,29 @@ def load_supplemental(path: str | Path) -> Supplemental:
             f"{path}: format is {declared_format!r}, this build reads "
             f"{' or '.join(repr(f) for f in ACCEPTED_FORMATS)}")
 
+    # NOTHING IN THIS DOCUMENT GOES UNREAD. See `KEYS_BY_FORMAT`: a reader that
+    # ignores what it does not recognise turns every later block into a silent
+    # drop, and this is the half of that which works without foresight.
+    carried = KEYS_BY_FORMAT[declared_format]
+    unknown = sorted(set(raw) - carried)
+    if unknown:
+        later = {key: name for name, keys in KEYS_BY_FORMAT.items()
+                 for key in keys if key not in carried}
+        named = {k: later[k] for k in unknown if k in later}
+        if named:
+            raise SupplementalError(
+                f"{path}: declares {sorted(named)} under format "
+                f"{declared_format!r}, which does not carry "
+                f"{'it' if len(named) == 1 else 'them'}. A build reading only "
+                f"that format would load this file, drop "
+                f"{'that block' if len(named) == 1 else 'those blocks'} and "
+                f"report the file as empty -- invisible rather than refused. "
+                f"Declare format {sorted(set(named.values()))[-1]!r} instead")
+        raise SupplementalError(
+            f"{path}: declares {unknown}, which no format this build reads "
+            f"carries. A key nothing reads is a declaration that reaches "
+            f"nothing, and the run would report on everything except it")
+
     result = Supplemental(provenance=str(raw.get("provenance") or ""),
                           source=str(path))
 
@@ -430,14 +476,6 @@ def load_supplemental(path: str | Path) -> Supplemental:
                 f"the collector walks at, so it has to be a positive number of "
                 f"seconds")
         result.sampling_interval_s = interval
-
-    if raw.get("couplings") and declared_format in FORMATS_WITHOUT_COUPLINGS:
-        raise SupplementalError(
-            f"{path}: declares couplings under format {declared_format!r}, which "
-            f"predates them. A build reading only that format loads this file "
-            f"without error, drops the couplings and reports the file as empty -- "
-            f"so the declaration would be invisible rather than refused. Declare "
-            f"format {FORMAT!r}, which such a build refuses by name")
 
     for index, block in enumerate(raw.get("couplings") or []):
         where = f"{path}: couplings[{index}]"

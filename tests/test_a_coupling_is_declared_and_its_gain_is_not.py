@@ -36,8 +36,8 @@ from pathlib import Path
 import pytest
 
 from presence_audit import conformance, generator
-from presence_audit.supplemental import (ESTIMATE, FORMAT,
-                                         FORMATS_WITHOUT_COUPLINGS,
+from presence_audit.supplemental import (ACCEPTED_FORMATS, ESTIMATE, FORMAT,
+                                         KEYS_BY_FORMAT,
                                          RESPONSE_MODELS, Coupling,
                                          Supplemental, SupplementalError,
                                          load_supplemental, unmatched_names)
@@ -369,23 +369,121 @@ class TestAnOlderReaderIsTOLDRatherThanLeftToIgnoreIt:
     malformed entry, arriving through the version skew instead.
     """
 
-    @pytest.mark.parametrize("older", FORMATS_WITHOUT_COUPLINGS)
+    @pytest.mark.parametrize("older", [f for f in ACCEPTED_FORMATS
+                                       if "couplings" not in KEYS_BY_FORMAT[f]])
     def test_a_coupling_under_an_older_format_is_refused(self, older):
         with pytest.raises(SupplementalError) as raised:
             load_supplemental(_file(format=older))
         assert FORMAT in str(raised.value), (
             "the refusal does not name the format to use instead")
 
-    @pytest.mark.parametrize("older", FORMATS_WITHOUT_COUPLINGS)
+    @pytest.mark.parametrize("older", [f for f in ACCEPTED_FORMATS
+                                       if "couplings" not in KEYS_BY_FORMAT[f]])
     def test_those_formats_still_read_everything_they_ever_did(self, older):
         """The bump must not retire them. Their shape is a subset of this one and
-        a file written before it is still this document."""
-        loaded = load_supplemental(_file(format=older, couplings=[],
-                                          counters=[{"sensor": "C",
-                                                     "basis": "it climbs"}]))
+        a file written before it is still this document.
+
+        Built WITHOUT the newer keys rather than with them emptied: the first
+        version of this passed `couplings: []` and was refused, correctly. The key
+        being PRESENT is the claim, and an empty one is not a smaller claim -- an
+        older reader drops it either way, and allowing the empty form would invite
+        declaring a block empty to get a file past the check.
+        """
+        doc = {"format": older, "provenance": "a bench",
+               "counters": [{"sensor": "C", "basis": "it climbs"}]}
+        path = Path(tempfile.mkdtemp()) / "s.json"
+        path.write_text(json.dumps(doc), encoding="utf-8")
+        loaded = load_supplemental(path)
         assert [c.sensor for c in loaded.counters] == ["C"]
 
+    @pytest.mark.parametrize("older", [f for f in ACCEPTED_FORMATS
+                                       if "couplings" not in KEYS_BY_FORMAT[f]])
+    def test_an_EMPTY_later_block_is_refused_too(self, older):
+        """Presence is the claim. An older reader drops `couplings: []` exactly as
+        it drops a populated one, so the file still says something no reader of
+        that id can see."""
+        doc = {"format": older, "provenance": "a bench", "couplings": []}
+        path = Path(tempfile.mkdtemp()) / "s.json"
+        path.write_text(json.dumps(doc), encoding="utf-8")
+        with pytest.raises(SupplementalError):
+            load_supplemental(path)
+
     def test_the_current_format_is_the_one_couplings_need(self):
-        assert FORMAT not in FORMATS_WITHOUT_COUPLINGS
+        assert "couplings" in KEYS_BY_FORMAT[FORMAT]
         assert load_supplemental(_file()).couplings
+
+
+class TestNothingInTheDocumentGoesUnread:
+    """The CLASS behind the coupling defect, and the only half that works without
+    foresight.
+
+    Bumping the format fixed one instance. It cannot fix the next, because the
+    failure is not about couplings -- it is that a reader IGNORES what it does not
+    recognise, so any block added to an already-published id is invisible to every
+    build already out there. A reader cannot be taught a key it has never heard of;
+    it CAN be taught to refuse one it does not know, and that is a property every
+    build shipped from here on has.
+
+    Forward-only, and the limit is stated rather than papered over: a build already
+    released cannot learn this. Those are what the format id protects. Two
+    mechanisms, two populations, neither replacing the other.
+    """
+
+    def test_a_key_no_format_carries_is_refused(self):
+        with pytest.raises(SupplementalError, match="reaches"):
+            load_supplemental(_file(invented_block=[]))
+
+    def test_a_later_formats_key_under_an_earlier_id_names_the_id_to_use(self):
+        """The more helpful of the two refusals: the author wrote a real block
+        under the wrong id, and being told which id carries it is the repair."""
+        with pytest.raises(SupplementalError) as raised:
+            load_supplemental(_file(format="presence-audit/supplemental/1"))
+        assert FORMAT in str(raised.value)
+
+    def test_every_accepted_format_declares_what_it_carries(self):
+        assert set(KEYS_BY_FORMAT) == set(ACCEPTED_FORMATS), (
+            "a format is accepted whose key set is undeclared, so the check "
+            "above would raise KeyError on a file that names it")
+
+    def test_the_declared_sets_are_what_the_LOADER_READS(self):
+        """DERIVED FROM THE SOURCE, in both directions, because this is the pair
+        that must not drift.
+
+        A key the loader reads and no format declares is refused on every file --
+        the block becomes dead on arrival. A key a format declares and the loader
+        never reads is accepted and consumed by nothing, which is the original
+        defect wearing the fix's clothes.
+        """
+        import ast
+        import inspect
+
+        from presence_audit import supplemental as module
+
+        tree = ast.parse(inspect.getsource(module.load_supplemental))
+        read = {node.args[0].value
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "get"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "raw"
+                and node.args and isinstance(node.args[0], ast.Constant)}
+        assert len(read) >= 5, f"the derivation found only {read}; it is broken"
+        declared = set().union(*KEYS_BY_FORMAT.values())
+        assert not read - declared, (
+            f"{sorted(read - declared)} are read by the loader and declared by no "
+            f"format, so every file carrying one is refused")
+        assert not declared - read, (
+            f"{sorted(declared - read)} are declared by a format and read by "
+            f"nothing -- accepted and consumed by neither, which is the silent "
+            f"drop this mechanism exists to remove")
+
+    def test_the_newest_format_carries_everything_the_others_do(self):
+        """A key may be added; one may not quietly vanish. A file that loaded
+        under an earlier id has to keep loading under the newest."""
+        newest = KEYS_BY_FORMAT[FORMAT]
+        for name, keys in KEYS_BY_FORMAT.items():
+            assert keys <= newest, (
+                f"{name} carries {sorted(keys - newest)} which {FORMAT} does not; "
+                f"a document that loaded before would now be refused")
 

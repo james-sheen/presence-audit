@@ -207,6 +207,19 @@ ids this package accepts is pinned by SIZE so a name cannot appear without
 somebody saying why. Renaming a state reads like a lexical improvement and is a
 wire-contract break.
 
+**Nothing in a supplemental document goes unread.** A key no format carries is
+refused, and a key a LATER format carries is refused under an earlier id with the
+id to use named. That is the general form of the defect below: a reader ignores
+what it does not recognise, so a block added to an already-published id is
+invisible to every build already out there — the file loads, the block vanishes,
+the run reports nothing. A reader cannot be taught a key it has never heard of;
+it can be taught to refuse one it does not know. **The mechanism is forward-only
+and the limit is stated rather than papered over**: builds already released
+cannot learn it, and the format id is what protects those. Two mechanisms, two
+populations, neither replacing the other. The declared key sets are checked
+against what the loader actually reads, in both directions, by a test that
+derives them from its source.
+
 **The supplemental set went to three, and this is the saying-why.**
 `presence-audit/supplemental/2` was cut because a new block in `/1` is invisible
 to a build that predates it — measured: such a build loads the file without
