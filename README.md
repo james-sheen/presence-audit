@@ -246,6 +246,20 @@ now generated as a number of collection samples rather than a fixed fifteen
 minutes, which is what it always meant — at a sixty-second cadence it is still
 `15m`, so a caller that declares no cadence sees no change.
 
+**Then to four, because the next field sat inside a block.** A coupling can now
+say how sure its gain is: `gain_sigma`, a standard deviation in the gain's own
+units — a datasheet's plus-or-minus, or a fit's standard error — with a
+`gain_sigma_basis` of its own. The engine adds it to the band around every value
+the coupling drives; without it that band treats the gain as exact, and until
+`/3` a datasheet tolerance had nowhere to be written. Every build reading `/2`
+already refuses a coupling key it does not know, so nothing was ever dropped; but
+it refuses saying the format has no field for a spread, which is false of a file
+written for this build. Under `/3` it names the real cause, a file newer than
+itself. A spread on a withheld gain, a zero, and one with no basis are refused:
+the first is a spread on no number, and the engine reads the others as no spread
+at all. The spread reaches the generated model under the engine's own key; its
+basis stays in the file, since the engine has no field for one.
+
 **The keys that still carry another domain's word.** Some keys in the report and
 in the supplemental file are named after the domain this package was extracted
 from. That is a real leak and it is written down here rather than quietly

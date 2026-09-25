@@ -656,6 +656,15 @@ def _generate(declaration: DeclarationSource, *, domain_id: str,
             transition = {"from": READING, "to": READING,
                           "source": coupling.gain_basis or coupling.basis}
             transition["gain"] = coupling.gain
+            # THE SPREAD REACHES THE ENGINE OR IT REACHES NOTHING. 0.1.10's
+            # lesson was a block this build parsed, validated and then never
+            # delivered, so the run was byte-identical to one without it. The
+            # engine's key is the same word; without it the band around what
+            # this coupling drives treats the gain as exact. Its basis stays in
+            # the file: the engine has no field for one and would report the
+            # key as unread.
+            if coupling.gain_sigma is not None:
+                transition["gain_sigma"] = coupling.gain_sigma
             relationship_rules.append({
                 "type": COUPLING_RELATION,
                 "source_type": by_name[coupling.source],

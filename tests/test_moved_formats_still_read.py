@@ -112,6 +112,13 @@ class TestAnUnknownNameIsStillRefused:
         taught to notice a key it has never heard of, so the notice goes in the
         one field every reader already checks. `/1` is still read, because its
         shape is a subset; a file combining `/1` with a coupling is refused.
+
+        AND TO FOUR. `/3` carries a coupling's `gain_sigma`, a key inside a
+        block. Every build reading `/2` already refuses a block key it does not
+        know, so nothing would have been dropped -- but it refuses saying the
+        format has no field for a spread, which is false of a file written for
+        a build that has one. Under `/3` that build names the true cause, a file
+        newer than itself. `/2` is still read: it is `/3` with no spread in it.
         """
         assert len(attestation.ACCEPTED_ATTESTATION_FORMATS) == 2
-        assert len(supplemental.ACCEPTED_FORMATS) == 3
+        assert len(supplemental.ACCEPTED_FORMATS) == 4

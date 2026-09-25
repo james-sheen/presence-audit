@@ -38,6 +38,15 @@ the number. The engine then fits it from history and reports it with its `n`, it
 down**. Withholding is the honest default; inventing a coefficient to make a
 simulation run would put a guess where this format's whole purpose is to refuse one.
 
+**So is its spread.** A coupling that states a number may also state
+`gain_sigma` -- how sure anyone is of that gain, as a standard deviation in the
+gain's own units: a datasheet's plus-or-minus, or a fit's standard error -- with
+a `gain_sigma_basis` of its own. The engine adds it to the band around every
+value the coupling drives; without it that band carries only what the driver's
+own forecast is unsure of, as though the gain were exact. A spread on a withheld
+gain is refused, because it would be a spread on no number. It needs format 3,
+for the reason format 2 exists.
+
 **`sampling_interval_s` is required once a coupling is declared, and this was
 MEASURED rather than reasoned.** The fit aligns the two series on a shared grid, so a
 `propagation_delay_s` that is not a multiple of the collection cadence can align no
@@ -61,7 +70,7 @@ modelled whether or not it has bounds.
 ## The file
 
     {
-      "format": "presence-audit/supplemental/2",
+      "format": "presence-audit/supplemental/3",
       "provenance": "who established this and how",
       "redundant_groups": [
         {"sensors": ["A", "B"], "tolerance": 0.05,
@@ -76,6 +85,11 @@ modelled whether or not it has bounds.
         {"from": "DRIVER_POINT", "to": "DRIVEN_POINT",
          "propagation_delay_s": 300, "time_constant_s": 600,
          "gain": "estimate",
+         "basis": "why the first drives the second"},
+        {"from": "OTHER_DRIVER", "to": "OTHER_DRIVEN",
+         "propagation_delay_s": 0, "time_constant_s": 300,
+         "gain": 0.004, "gain_basis": "what measured the number",
+         "gain_sigma": 0.0002, "gain_sigma_basis": "how sure that measurement is",
          "basis": "why the first drives the second"}
       ]
     }
@@ -94,17 +108,18 @@ create, leaving a file that looks like the check is running.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import vocabulary as _vocabulary
 
-__all__ = ["ACCEPTED_FORMATS", "KEYS_BY_FORMAT",
+__all__ = ["ACCEPTED_FORMATS", "KEYS_BY_FORMAT", "COUPLING_KEYS_BY_FORMAT",
            "Supplemental", "RedundantGroup", "Counter", "Coupling",
            "load_supplemental", "SupplementalError", "FORMAT",
            "RESPONSE_MODELS", "ESTIMATE"]
 
-FORMAT = "presence-audit/supplemental/2"
+FORMAT = "presence-audit/supplemental/3"
 
 #: Accepted on read, newest first. The earlier ids are still read: their shape is a
 #: SUBSET of this one, so a file written before the move is still this document.
@@ -125,7 +140,16 @@ FORMAT = "presence-audit/supplemental/2"
 #:
 #: The size of this set is pinned by a test so a third name cannot appear without
 #: somebody saying why. This is that saying-why.
-ACCEPTED_FORMATS = (FORMAT, "presence-audit/supplemental/1",
+#:
+#: **/3 EXISTS FOR THE SAME REASON, ONE LEVEL DOWN.** A coupling's `gain_sigma` is
+#: a key INSIDE a block rather than a new block, and every build that reads /2
+#: already refuses a coupling key it does not know -- but it refuses with a
+#: sentence saying this format has no field for a spread, which is false of any
+#: file written for a build that has one. Under /3 the same build names the real
+#: cause: the file is newer than the build reading it. /2 is still read, because
+#: a /2 document is a /3 document with no spread in it.
+ACCEPTED_FORMATS = (FORMAT, "presence-audit/supplemental/2",
+                    "presence-audit/supplemental/1",
                     "bmc-sensor-audit/supplemental/1")
 
 #: WHAT EACH FORMAT CARRIES, and the mechanism that makes the next block visible.
@@ -155,6 +179,11 @@ KEYS_BY_FORMAT = {
     "presence-audit/supplemental/2": frozenset({
         "format", "provenance", "redundant_groups", "counters", "flows",
         "couplings", "sampling_interval_s"}),
+    # The same document keys: what /3 adds is inside a coupling, and the set
+    # below is where that is declared.
+    "presence-audit/supplemental/3": frozenset({
+        "format", "provenance", "redundant_groups", "counters", "flows",
+        "couplings", "sampling_interval_s"}),
 }
 
 # The engine's own default is 0.05 relative. Restated rather than imported because
@@ -179,10 +208,25 @@ _DIRECTIONS = ("increasing", "decreasing")
 #: permitted set is per-vertical and deciding it is a design question rather
 #: than a typo fix. A coupling names its ends `from` and `to`, which are
 #: nobody's domain word, so it has one answer.
-COUPLING_KEYS = frozenset({
-    "from", "to", "propagation_delay_s", "time_constant_s", "response_model",
-    "gain", "gain_basis", "basis",
-})
+#:
+#: PER FORMAT, because a key added inside a block is exactly as invisible to an
+#: older reader as a block added to a document -- see `ACCEPTED_FORMATS`. Only
+#: the formats that carry `couplings:` at all appear here; the document check
+#: refuses a coupling under any other id before a block is read.
+COUPLING_KEYS_BY_FORMAT = {
+    "presence-audit/supplemental/2": frozenset({
+        "from", "to", "propagation_delay_s", "time_constant_s",
+        "response_model", "gain", "gain_basis", "basis",
+    }),
+    "presence-audit/supplemental/3": frozenset({
+        "from", "to", "propagation_delay_s", "time_constant_s",
+        "response_model", "gain", "gain_basis", "basis",
+        "gain_sigma", "gain_sigma_basis",
+    }),
+}
+
+#: Every key a coupling may carry under the newest format.
+COUPLING_KEYS = COUPLING_KEYS_BY_FORMAT[FORMAT]
 
 #: The time courses the engine knows. Restated rather than imported for the reason
 #: `DEFAULT_TOLERANCE` is: Stage 1 must not import the engine.
@@ -258,6 +302,9 @@ class Coupling:
     number projects, and a withheld one declares the coupling and leaves the
     engine reporting a fit nobody has adopted. Which of those a file states is
     the operator's claim about whether anybody has measured it.
+
+    `gain_sigma` is how sure anyone is of that number, or `None` where nobody
+    said. It is only ever present beside a stated gain.
     """
 
     source: str
@@ -268,10 +315,17 @@ class Coupling:
     response_model: str = "exponential"
     gain: float | str = ESTIMATE
     gain_basis: str | None = None
+    gain_sigma: float | None = None
+    gain_sigma_basis: str | None = None
 
     @property
     def gain_is_withheld(self) -> bool:
         return isinstance(self.gain, str)
+
+    @property
+    def spread_is_declared(self) -> bool:
+        """True when the file states how sure anyone is of the gain."""
+        return self.gain_sigma is not None
 
     @property
     def members(self) -> tuple[str, ...]:
@@ -501,17 +555,32 @@ def load_supplemental(path: str | Path) -> Supplemental:
         where = f"{path}: couplings[{index}]"
         if not isinstance(block, dict):
             raise SupplementalError(f"{where} is not an object")
-        unknown_keys = sorted(set(block) - COUPLING_KEYS)
+        readable = COUPLING_KEYS_BY_FORMAT.get(declared_format, frozenset())
+        unknown_keys = sorted(set(block) - readable)
         if unknown_keys:
+            # The document check, one level down: a key a LATER format carries
+            # is named with the id that carries it, because the author wrote a
+            # real key under the wrong id and the id is the repair.
+            later = [name for name in ACCEPTED_FORMATS
+                     if set(unknown_keys) & COUPLING_KEYS_BY_FORMAT.get(
+                         name, frozenset())]
+            if later and not set(unknown_keys) - set().union(
+                    *COUPLING_KEYS_BY_FORMAT.values()):
+                raise SupplementalError(
+                    f"{where} declares {unknown_keys} under format "
+                    f"{declared_format!r}, which does not carry "
+                    f"{'it' if len(unknown_keys) == 1 else 'them'} in a "
+                    f"coupling. A build reading only that format would refuse "
+                    f"the file and blame the key; under the newer id it names "
+                    f"the real cause, a file newer than the build. Declare "
+                    f"format {later[0]!r} instead")
             raise SupplementalError(
                 f"{where} declares {unknown_keys}, which this block does not "
                 f"read. The document is already refused for a key no format "
                 f"carries; a block was not, so a misspelling inside one went "
                 f"to the same place as a key that did nothing -- nowhere, "
-                f"silently. `gain_sigma` is the live case: the engine fits a "
-                f"spread and this format has no field for it, so writing one "
-                f"here changed nothing and read as though it had. This block "
-                f"reads {sorted(COUPLING_KEYS)}")
+                f"silently, in a file that read as though it had been "
+                f"applied. This block reads {sorted(readable)}")
         driver = str(_require(block, "from", where))
         driven = str(_require(block, "to", where))
         if driver == driven:
@@ -579,12 +648,53 @@ def load_supplemental(path: str | Path) -> Supplemental:
                     f"with nothing establishing it is the guess this file exists "
                     f"to refuse; withhold it with gain: {ESTIMATE!r} instead")
 
+        # THE SPREAD. Each refusal here is a silent failure somewhere else: the
+        # engine reads a zero spread as no spread, so a declared zero leaves the
+        # band exactly as an absent key does, from a file that reads as though
+        # the gain's doubt was stated.
+        sigma = block.get("gain_sigma")
+        sigma_basis = block.get("gain_sigma_basis")
+        if sigma is None:
+            if sigma_basis is not None:
+                raise SupplementalError(
+                    f"{where} states a gain_sigma_basis and no gain_sigma. A "
+                    f"basis is what establishes a number, and there is no "
+                    f"number here")
+        else:
+            if isinstance(gain, str):
+                raise SupplementalError(
+                    f"{where} withholds the gain and states a gain_sigma. A "
+                    f"spread is how sure somebody is of a number, and there is "
+                    f"no number here")
+            if isinstance(sigma, bool) or not isinstance(sigma, (int, float)):
+                raise SupplementalError(
+                    f"{where} declares gain_sigma {sigma!r}; it is a number, a "
+                    f"standard deviation in the gain's own units. It has no "
+                    f"withheld form, because it is only ever written beside a "
+                    f"gain somebody stated")
+            sigma = float(sigma)
+            if not math.isfinite(sigma) or sigma <= 0:
+                raise SupplementalError(
+                    f"{where} declares gain_sigma {sigma!r}. A standard "
+                    f"deviation is a positive finite number, and the engine "
+                    f"reads zero as no spread at all: the band would treat the "
+                    f"gain as exact, from a file that reads as though it said "
+                    f"otherwise")
+            if not str(sigma_basis or "").strip():
+                raise SupplementalError(
+                    f"{where} states a gain_sigma and no gain_sigma_basis. The "
+                    f"spread widens the window a later reading has to land in "
+                    f"to confirm a projection, so it is a specification like "
+                    f"the gain, and the gain's basis does not establish it")
+
         result.couplings.append(Coupling(
             source=driver, target=driven,
             basis=str(_require(block, "basis", where)),
             propagation_delay_s=delay, time_constant_s=constant,
             response_model=model, gain=gain,
-            gain_basis=None if gain_basis is None else str(gain_basis)))
+            gain_basis=None if gain_basis is None else str(gain_basis),
+            gain_sigma=sigma,
+            gain_sigma_basis=None if sigma_basis is None else str(sigma_basis)))
 
     for index, block in enumerate(raw.get("counters") or []):
         where = f"{path}: counters[{index}]"

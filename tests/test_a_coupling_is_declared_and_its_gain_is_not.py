@@ -496,15 +496,19 @@ class TestABlockRefusesAKeyItDoesNotRead:
     does nothing goes, which is nowhere, silently.
 
     It mattered little while these files were only hand-written. It matters now
-    that a tool writes into them: an `adopt` verb sets `gain` and `gain_basis`
-    from a fitted proposal, and a near-miss on either leaves a file that reads
-    as adopted and is not.
+    that a tool writes into them: an `adopt` verb sets `gain`, `gain_basis` and
+    the spread from a fitted proposal, and a near-miss on any of them leaves a
+    file that reads as adopted and is not.
     """
 
     def test_an_unknown_key_is_refused(self):
+        """`gain_sigma` was this test's key until format 3 carried it. Kept on
+        it, the test went on passing -- refused for a spread on a withheld gain,
+        a different rule -- so it now uses a near-miss no format carries."""
         with pytest.raises(SupplementalError) as raised:
-            load_supplemental(_with(gain_sigma=0.002))
-        assert "gain_sigma" in str(raised.value)
+            load_supplemental(_with(gain_stdev=0.002))
+        assert "gain_stdev" in str(raised.value)
+        assert "does not read" in str(raised.value)
 
     def test_the_message_says_what_the_block_does_read(self):
         """A refusal that names only the offender leaves the author guessing at
@@ -522,7 +526,8 @@ class TestABlockRefusesAKeyItDoesNotRead:
         assert set(WHOLE) <= COUPLING_KEYS, sorted(set(WHOLE) - COUPLING_KEYS)
         assert loaded.couplings
 
-    def test_the_gain_basis_key_is_in_it(self):
-        """The one an `adopt` verb writes. It was already read by the loader and
-        would now be refused if the set forgot it."""
-        assert "gain_basis" in COUPLING_KEYS
+    def test_the_keys_an_adopt_verb_writes_are_in_it(self):
+        """The ones an `adopt` verb writes. Each is read by the loader and
+        would be refused if the set forgot it."""
+        for key in ("gain_basis", "gain_sigma", "gain_sigma_basis"):
+            assert key in COUPLING_KEYS, key
