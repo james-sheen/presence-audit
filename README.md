@@ -246,7 +246,7 @@ now generated as a number of collection samples rather than a fixed fifteen
 minutes, which is what it always meant — at a sixty-second cadence it is still
 `15m`, so a caller that declares no cadence sees no change.
 
-**Then to four, because the next field sat inside a block.** A coupling can now
+**Then to four, in 0.1.11, because the next field sat inside a block.** A coupling can now
 say how sure its gain is: `gain_sigma`, a standard deviation in the gain's own
 units — a datasheet's plus-or-minus, or a fit's standard error — with a
 `gain_sigma_basis` of its own. The engine adds it to the band around every value
