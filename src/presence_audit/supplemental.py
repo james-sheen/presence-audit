@@ -164,6 +164,26 @@ DEFAULT_TOLERANCE = 0.05
 
 _DIRECTIONS = ("increasing", "decreasing")
 
+#: Every key a `couplings` entry may carry.
+#:
+#: The DOCUMENT has refused an unknown key since this format was written; a
+#: BLOCK did not, so a misspelling inside one was indistinguishable from a key
+#: that simply did nothing. That mattered little while these files were only
+#: hand-written and matters more now that a tool writes into them: an `adopt`
+#: verb in a vertical sets `gain` and `gain_basis` from a fitted proposal, and
+#: a near-miss on either leaves a file that reads as adopted and is not.
+#:
+#: THE OTHER THREE BLOCK TYPES ARE NOT CHECKED THIS WAY YET, and that is named
+#: rather than quietly left: `redundant_groups`, `counters` and `flows` all
+#: accept a vertical's own noun as an alias for the published one, so their
+#: permitted set is per-vertical and deciding it is a design question rather
+#: than a typo fix. A coupling names its ends `from` and `to`, which are
+#: nobody's domain word, so it has one answer.
+COUPLING_KEYS = frozenset({
+    "from", "to", "propagation_delay_s", "time_constant_s", "response_model",
+    "gain", "gain_basis", "basis",
+})
+
 #: The time courses the engine knows. Restated rather than imported for the reason
 #: `DEFAULT_TOLERANCE` is: Stage 1 must not import the engine.
 #:
@@ -481,6 +501,17 @@ def load_supplemental(path: str | Path) -> Supplemental:
         where = f"{path}: couplings[{index}]"
         if not isinstance(block, dict):
             raise SupplementalError(f"{where} is not an object")
+        unknown_keys = sorted(set(block) - COUPLING_KEYS)
+        if unknown_keys:
+            raise SupplementalError(
+                f"{where} declares {unknown_keys}, which this block does not "
+                f"read. The document is already refused for a key no format "
+                f"carries; a block was not, so a misspelling inside one went "
+                f"to the same place as a key that did nothing -- nowhere, "
+                f"silently. `gain_sigma` is the live case: the engine fits a "
+                f"spread and this format has no field for it, so writing one "
+                f"here changed nothing and read as though it had. This block "
+                f"reads {sorted(COUPLING_KEYS)}")
         driver = str(_require(block, "from", where))
         driven = str(_require(block, "to", where))
         if driver == driven:

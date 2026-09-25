@@ -230,6 +230,22 @@ goes in the one field every reader already checks. Both earlier ids are still
 read, because their shape is a subset; a file combining one of them with a
 coupling is refused by name.
 
+**And then the block was read by a build that did nothing with it.** That last
+sentence describes an OLD reader dropping a new block. 0.1.10 fixes the mirror
+image, which nothing was watching for: this build parsed the coupling, refused
+four different malformations in it, emitted it into the generated model, recorded
+the pair in the manifest — and never added the relationship the model needs, so
+the engine reported `couplings_seen: 0` and a run with a coupling declared was
+byte-identical to one without. The format id protects a reader that has never
+heard of the block. Nothing protected the reader that had. Alongside it, the
+feeder stamped observations sixty seconds apart whatever `sampling_interval_s`
+said, so a delay this format validates against the collection grid was applied on
+a different one: measured on a series generated from its driver at exactly one
+interval, the fit came back **-0.0023 against a truth of +0.0040**. The window is
+now generated as a number of collection samples rather than a fixed fifteen
+minutes, which is what it always meant — at a sixty-second cadence it is still
+`15m`, so a caller that declares no cadence sees no change.
+
 **The keys that still carry another domain's word.** Some keys in the report and
 in the supplemental file are named after the domain this package was extracted
 from. That is a real leak and it is written down here rather than quietly

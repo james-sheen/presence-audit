@@ -34,7 +34,8 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Sequence
 
 from . import vocabulary as _vocabulary
-from .generator import READING, Manifest, peer_property
+from .generator import (COUPLING_RELATION, DEFAULT_SAMPLE_INTERVAL_S, READING,
+                        Manifest, peer_property)
 
 __all__ = ["FeedResult", "DetectOutcome", "feed", "unmapped_observations",
            "evaluate", "STUCK_AT_SAMPLE_FLOOR", "ENVELOPE_SCHEMA_VERSION"]
@@ -55,6 +56,7 @@ ENVELOPE_SCHEMA_VERSION = 1
 # STABILITY finding at ten or more. See docs/stage2/s1-threshold-granularity.md for the
 # sibling measurement; this one is recorded in the canary.
 STUCK_AT_SAMPLE_FLOOR = 10
+
 
 # Declines that assert the tool's core case. If one of these arrives, something the
 # feeder promised the engine did not turn up.
@@ -161,6 +163,19 @@ class FeedResult:
     # the human-readable list rather than parsed back out of it -- re-deriving one
     # from the other means a display change silently alters a gate decision.
     entities_missing_peers: set[str] = field(default_factory=set)
+    #: Declared couplings that became an EDGE in the session, as (driver, driven)
+    #: display names. `manifest.coupled` says which became a relationship RULE,
+    #: which is a different claim: a rule with no edge under it is checked
+    #: against nothing.
+    coupled: list[tuple[str, str]] = field(default_factory=list)
+    #: And every one that did not, with the reason. A coupling whose endpoint was
+    #: not fed this run -- not reading, or not modelled -- has no edge, and the
+    #: run then looks exactly like a run where no coupling was declared.
+    couplings_not_fed: list[dict] = field(default_factory=list)
+    #: The grid the observations were stamped on, in seconds. Reported because
+    #: a fitted gain is only meaningful against the spacing it was fitted at,
+    #: and until 0.1.10 this was 60 whatever the file said.
+    interval_seconds: float = 0.0
 
     @property
     def warming_up(self) -> dict[str, int]:
@@ -213,6 +228,27 @@ def feed(session: Any, manifest: Manifest,
         return FeedResult()
 
     result = FeedResult()
+    #: Entity types that actually reached the session, so a coupling is wired
+    #: only between two things that are in it.
+    registered: set[str] = set()
+    # THE GRID IS THE COLLECTOR'S, NOT THIS MODULE'S.
+    #
+    # The supplemental format requires `sampling_interval_s` as soon as a
+    # coupling is declared, and refuses a `propagation_delay_s` that is not a
+    # multiple of it -- because a delay off the collection grid can align no
+    # pair of readings. Until 0.1.10 this function then stamped every
+    # observation sixty seconds apart regardless, so the file was validated
+    # against one grid and fitted on another, and the two never compared notes.
+    #
+    # MEASURED, not reasoned. On a synthetic board whose driven series was
+    # generated from its driver at exactly one collection interval, with the
+    # file declaring the real 300 s cadence: the fit came back -0.0023 against
+    # a truth of +0.0040 -- wrong sign, r-squared 0.33, and a confidence
+    # interval that excluded the true value. Declaring 60 s, the grid this
+    # function actually used, recovered 0.0040 at r-squared 1.0. A fitted gain
+    # is only a statement about the spacing it was fitted at.
+    result.interval_seconds = float(
+        manifest.sampling_interval_s or DEFAULT_SAMPLE_INTERVAL_S)
     history: dict[str, list[float]] = {}
     for report in reports:
         for match in report.matches:
@@ -266,7 +302,7 @@ def feed(session: Any, manifest: Manifest,
         series = history.get(name, [])
         if series:
             session.add_observations(entity_type, READING, series,
-                                     interval_seconds=60.0)
+                                     interval_seconds=result.interval_seconds)
         # CONSERVATION reads a SERIES, not a current value -- fed only the properties
         # it declines `insufficient_samples` with *no observations of input property*,
         # which reads like a warm-up and never clears. CONSISTENCY needs only the
@@ -277,10 +313,53 @@ def feed(session: Any, manifest: Manifest,
                 peer_series = history.get(peer, [])
                 if peer_series:
                     session.add_observations(entity_type, peer_property(peer),
-                                             peer_series, interval_seconds=60.0)
+                                             peer_series,
+                                             interval_seconds=result.interval_seconds)
         result.samples[name] = len(series)
         result.fed += 1
+        registered.add(entity_type)
+
+    _wire_couplings(session, manifest, result, registered)
     return result
+
+
+def _wire_couplings(session: Any, manifest: Manifest, result: FeedResult,
+                    registered: set[str]) -> None:
+    """Turn each declared coupling into an EDGE between the two entities.
+
+    **The defect this exists to close.** A coupling declared in a supplemental
+    file was read, validated in detail, and written into the generated model as
+    a `relationship_rules` entry -- and then nothing anywhere added the
+    relationship it describes. A rule is a statement about two TYPES; a fit
+    needs an instance of it. So `model_describe` reported `couplings_seen: 0`
+    and a run with a coupling declared was byte-identical to a run without one:
+    no gain, no interval, and no refusal saying why.
+
+    That is the worse half of the shape this package has a rule about. A
+    component that ignores what it does not recognise at least has the excuse
+    of not recognising it. This one parsed the block, refused four different
+    malformations in it, emitted it into the model, recorded the pair in the
+    manifest, and produced nothing -- with every check along the way passing.
+
+    BOTH ENDPOINTS MUST HAVE BEEN FED, and a coupling whose endpoint was not is
+    RECORDED rather than skipped. An edge to an entity that was never
+    registered is a claim about something not in the session; leaving it out
+    silently puts the run back in the state above, where a coupling that
+    contributes nothing looks exactly like a coupling that agrees.
+    """
+    for source, target in manifest.coupled:
+        source_type = manifest.type_for(source)
+        target_type = manifest.type_for(target)
+        absent = [name for name, entity_type in ((source, source_type),
+                                                 (target, target_type))
+                  if entity_type is None or entity_type not in registered]
+        if absent:
+            result.couplings_not_fed.append(
+                {"from": source, "to": target, "reason": "endpoint_not_fed",
+                 "missing": absent})
+            continue
+        session.add_relationship(source_type, COUPLING_RELATION, target_type)
+        result.coupled.append((source, target))
 
 
 def unmapped_observations(describe: dict) -> list[dict]:

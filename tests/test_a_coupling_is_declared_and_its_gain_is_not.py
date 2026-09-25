@@ -36,7 +36,8 @@ from pathlib import Path
 import pytest
 
 from presence_audit import conformance, generator
-from presence_audit.supplemental import (ACCEPTED_FORMATS, ESTIMATE, FORMAT,
+from presence_audit.supplemental import (ACCEPTED_FORMATS, COUPLING_KEYS,
+                                         ESTIMATE, FORMAT,
                                          KEYS_BY_FORMAT,
                                          RESPONSE_MODELS, Coupling,
                                          Supplemental, SupplementalError,
@@ -487,3 +488,41 @@ class TestNothingInTheDocumentGoesUnread:
                 f"{name} carries {sorted(keys - newest)} which {FORMAT} does not; "
                 f"a document that loaded before would now be refused")
 
+
+
+class TestABlockRefusesAKeyItDoesNotRead:
+    """The document has refused an unknown key since this format was written.
+    A BLOCK did not -- so a misspelling inside one went exactly where a key that
+    does nothing goes, which is nowhere, silently.
+
+    It mattered little while these files were only hand-written. It matters now
+    that a tool writes into them: an `adopt` verb sets `gain` and `gain_basis`
+    from a fitted proposal, and a near-miss on either leaves a file that reads
+    as adopted and is not.
+    """
+
+    def test_an_unknown_key_is_refused(self):
+        with pytest.raises(SupplementalError) as raised:
+            load_supplemental(_with(gain_sigma=0.002))
+        assert "gain_sigma" in str(raised.value)
+
+    def test_the_message_says_what_the_block_does_read(self):
+        """A refusal that names only the offender leaves the author guessing at
+        the spelling they wanted."""
+        with pytest.raises(SupplementalError) as raised:
+            load_supplemental(_with(gian=1.0))
+        for key in ("propagation_delay_s", "gain_basis", "basis"):
+            assert key in str(raised.value)
+
+    def test_every_key_the_loader_reads_is_in_the_set(self):
+        """Derived against the loader rather than asserted, so a key added to
+        the parser and not to the set refuses a file the parser understands --
+        which is the failure mode a closed set introduces."""
+        loaded = load_supplemental(_file())
+        assert set(WHOLE) <= COUPLING_KEYS, sorted(set(WHOLE) - COUPLING_KEYS)
+        assert loaded.couplings
+
+    def test_the_gain_basis_key_is_in_it(self):
+        """The one an `adopt` verb writes. It was already read by the loader and
+        would now be refused if the set forgot it."""
+        assert "gain_basis" in COUPLING_KEYS

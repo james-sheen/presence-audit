@@ -69,7 +69,9 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from .supplemental import Supplemental
 
 __all__ = ["GeneratedSensor", "Manifest", "generate", "BOUND_OF_PROBLEM",
-           "COMPARISON_PROBLEMS", "peer_property", "PEER_PREFIX"]
+           "COMPARISON_PROBLEMS", "peer_property", "PEER_PREFIX",
+           "window_for", "WINDOW_SAMPLES", "DEFAULT_SAMPLE_INTERVAL_S",
+           "COUPLING_RELATION"]
 
 READING = "reading"
 
@@ -84,7 +86,44 @@ COUPLING_RELATION = "drives"
 #: level observed with noise; where the series does not support that, the engine
 #: declines `unidentifiable_parameter` by name rather than fitting something wrong.
 DRIVER_DYNAMICS = "local_level"
-WINDOW = "15m"
+
+#: The indicator time window, in COLLECTION SAMPLES rather than in minutes.
+#:
+#: `window:` is not *how much history to consider*. It is a hard ceiling on how
+#: many observations can ever be counted, so its only meaningful unit is the
+#: collector's own cadence: `window / interval - 1` samples fit, and STABILITY
+#: needs ten. A window expressed in minutes is that arithmetic with one of its
+#: three terms hidden.
+#:
+#: This was `"15m"` until 0.1.10, which was correct only because the feeder
+#: stamped every observation sixty seconds apart whatever the file said. The
+#: moment the feeder started using the DECLARED cadence, a board walking at
+#: five minutes held two samples against a floor of ten -- measured: two
+#: completely frozen points over forty walks produced NO finding and declined
+#: `insufficient_samples`, which reads as still warming up and never clears.
+#:
+#: Fifteen keeps the number this package has always generated: at a sixty-second
+#: cadence `window_for` returns `15m` exactly, so no board that was being fed
+#: correctly sees any change.
+WINDOW_SAMPLES = 15
+
+#: The grid used when no collection cadence is declared, in seconds.
+#:
+#: Until 0.1.10 this was the ONLY grid: every observation was stamped a minute
+#: apart whatever the file said. Harmless for the axioms this package started
+#: with -- STABILITY asks whether a series moved and CONSERVATION sums it, and
+#: neither reads the spacing -- and not harmless for a coupling, which is
+#: ALIGNED on the grid before it is fitted.
+#:
+#: It applies only where nothing was declared, because the supplemental format
+#: requires `sampling_interval_s` exactly when a coupling is declared. A number
+#: chosen here where an author stated one is this package overruling the file.
+#:
+#: It lives beside the window rather than beside the feed call because the two
+#: are one piece of arithmetic -- `window / interval - 1` against a floor -- and
+#: splitting them across modules is how the window came to be a constant that
+#: was only ever right for one cadence.
+DEFAULT_SAMPLE_INTERVAL_S = 60.0
 
 # Which side of the band each BOUNDEDNESS finding speaks about, derived by running
 # every arm of the axiom on 0.1.7 rather than read off its source: a model declaring
@@ -197,6 +236,16 @@ class Manifest:
     #: endpoint was excluded leaves a file declaring a chain the model does not
     #: contain, and a rollout that reports nothing because it was asked nothing.
     uncoupled: list[dict] = field(default_factory=list)
+    #: THE CADENCE THE COLLECTOR WALKS AT, carried from the supplemental so the
+    #: feeder can stamp observations at it.
+    #:
+    #: It travels here rather than being passed to `feed` separately because it
+    #: is a generation-time fact about the declaration, like every other field
+    #: on this object, and because `--manifest-out` then records the grid the
+    #: run was fitted on. `None` when no coupling was declared: the format
+    #: requires the cadence only once one is, and a default written in where
+    #: nobody declared anything would be this file choosing a number.
+    sampling_interval_s: float | None = None
 
     def exclude(self, reason: str, sensor: DeclaredPoint) -> None:
         self.excluded.setdefault(reason, []).append(sensor.display_name)
@@ -232,6 +281,7 @@ class Manifest:
         return {
             "domain_id": self.domain_id,
             "expect_variation": self.expect_variation,
+            "sampling_interval_s": self.sampling_interval_s,
             "supplemental_source": (Path(self.supplemental_source).name
                                     if self.supplemental_source else None),
             "counts": self.counts(),
@@ -392,9 +442,30 @@ def _bounds(sensor: DeclaredPoint):
             tuple(unmapped))
 
 
+def window_for(sampling_interval_s: float | None) -> str:
+    """The `window:` a model should declare for a collector at this cadence.
+
+    Returns a duration string the engine parses. Minutes where the arithmetic
+    lands on a whole number of them, seconds otherwise -- a window is read by
+    people as well as by the engine, and `15m` is legible where `900s` is not.
+
+    THE NUMBER IT RETURNS IS A CEILING ON COUNTABLE SAMPLES, not a lookback.
+    `window / interval - 1` observations fit inside it, so at a five-minute
+    cadence a fixed fifteen minutes holds two and STABILITY can never reach its
+    floor of ten. That is not a degraded check, it is a dead one, declining
+    `insufficient_samples` at any number of walks -- which reads as warming up.
+    """
+    interval = float(sampling_interval_s or DEFAULT_SAMPLE_INTERVAL_S)
+    seconds = WINDOW_SAMPLES * interval
+    if seconds % 60 == 0:
+        return f"{int(seconds // 60)}m"
+    return f"{seconds:g}s"
+
+
 def _indicator(upper: tuple[float | None, float | None],
                lower: tuple[float | None, float | None],
-               expect_variation: bool) -> dict:
+               expect_variation: bool,
+               sampling_interval_s: float | None = None) -> dict:
     """One indicator carrying whichever bound pairs the configuration declared.
 
     A point declaring only a ceiling gets `warning`/`critical`; one declaring only
@@ -409,7 +480,8 @@ def _indicator(upper: tuple[float | None, float | None],
     reads both slots.
     """
     indicator: dict = {"name": READING, "type": "NUMERIC",
-                       "axioms": ["BOUNDEDNESS", "STABILITY"], "window": WINDOW}
+                       "axioms": ["BOUNDEDNESS", "STABILITY"],
+                       "window": window_for(sampling_interval_s)}
     if upper != (None, None):
         critical = upper[1] if upper[1] is not None else upper[0]
         indicator["warning"] = upper[0] if upper[0] is not None else critical
@@ -450,6 +522,13 @@ def _generate(declaration: DeclarationSource, *, domain_id: str,
     parameter because the calibration cannot be done without a real capture.
     """
     manifest = Manifest(domain_id=domain_id, expect_variation=expect_variation)
+    # BEFORE the generation loop, because every indicator's `window:` is a number
+    # of COLLECTION SAMPLES and that loop needs the cadence to render it. Set
+    # later -- beside the couplings, where the supplemental is next read -- it
+    # would be None for every indicator and the window would silently be the
+    # default one, which is the shape this whole change exists to remove.
+    if supplemental is not None:
+        manifest.sampling_interval_s = supplemental.sampling_interval_s
     # The vertical proposes peer groups; how it finds them is its business.
     manifest.candidates = _vocabulary.member("peer_groups")(declaration)
     modelled_regardless: set[str] = set()
@@ -495,7 +574,8 @@ def _generate(declaration: DeclarationSource, *, domain_id: str,
 
         entity_type = _entity_type(sensor.display_name, taken)
         entity_types.append(entity_type)
-        indicator = _indicator(upper, lower, expect_variation)
+        indicator = _indicator(upper, lower, expect_variation,
+                               manifest.sampling_interval_s)
 
         group = (supplemental.group_for(sensor.display_name)
                  if supplemental is not None else None)

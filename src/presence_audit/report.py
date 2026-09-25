@@ -614,6 +614,27 @@ def detect_as_text(outcome, feed_result) -> str:
         if len(feed_result.peers_not_reading) > 5:
             lines.append(f"      ... and {len(feed_result.peers_not_reading) - 5} more")
 
+    if getattr(feed_result, "couplings_not_fed", None):
+        # Same rule as the pairing above, for the same reason: a declared coupling
+        # that produced no edge contributes no fit and no refusal, and a report
+        # that said nothing would read as a coupling the data agreed with.
+        lines.append("")
+        lines.append(f"  Couplings not fitted -- {len(feed_result.couplings_not_fed)} "
+                     "declared coupling(s) whose endpoint did not reach the model:")
+        for entry in feed_result.couplings_not_fed[:5]:
+            lines.append(f"      {entry['from']} -> {entry['to']}: "
+                         f"{', '.join(entry['missing'])}")
+        if len(feed_result.couplings_not_fed) > 5:
+            lines.append(f"      ... and {len(feed_result.couplings_not_fed) - 5} more")
+
+    if getattr(feed_result, "coupled", None):
+        # The grid travels with the count. A fitted gain is a statement about the
+        # spacing it was fitted at, and a reader comparing one against a datasheet
+        # has no way to check that without knowing which grid was used.
+        lines.append("")
+        lines.append(f"  Couplings fitted     {len(feed_result.coupled):>5}"
+                     f"   on a {feed_result.interval_seconds:g} s grid")
+
     warming = feed_result.warming_up
     if warming:
         shown = sorted(warming.items())[:5]
