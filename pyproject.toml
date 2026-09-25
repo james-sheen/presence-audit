@@ -33,3 +33,15 @@ path = "src/presence_audit/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/presence_audit"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# THE TREE, NOT WHATEVER IS INSTALLED. CI installs this package with `-e .`, so
+# it has always run the suite against the source; a developer with a released
+# wheel on the path had not, and nothing said so. Measured on 0.1.10: a bare
+# `pytest` in this checkout imported the 0.1.9 wheel from site-packages, ran 403
+# tests and reported them green -- none of them about the tree they sit in.
+#
+# The shipped bridge is still resolved normally, so the one test that adapts a
+# really published implementation keeps adapting a really published one.
+pythonpath = ["src"]
