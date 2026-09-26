@@ -171,3 +171,33 @@ class TestTheKindSetsDidNotMove:
             regression.Change("point_removed", "B", "d")])
         ordered = report._ordered_changes(built)
         assert [c.kind for c in ordered] == ["point_removed", "threshold_added"]
+
+
+class TestAManifestOlderThanTheRename:
+    """The attestation builder reads a caller's manifest, and a vertical's own
+    manifest class may answer only the old member. One vertical also derives
+    what the builder reads from its source, by name -- so the old member is
+    read under its literal name, where that derivation can see it."""
+
+    def _old(self):
+        class Old:
+            pass
+        manifest = Old()
+        setattr(manifest, OLD_SUBJECTS, [generator.GeneratedPoint(
+            entity_type="T", declared_name="Name on the board", source="f",
+            upper=(1.0, 2.0), lower=(None, None))])
+        return manifest
+
+    def test_it_still_names_its_points(self):
+        from presence_audit import attestation
+        assert attestation._declared_name("T", self._old()) == "Name on the board"
+
+    def test_both_members_can_be_derived_from_the_builder(self):
+        import ast
+        import inspect
+        from presence_audit import attestation
+        read = {node.args[1].value for node in ast.walk(ast.parse(inspect.getsource(attestation)))
+                if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "getattr"
+                and len(node.args) >= 3 and getattr(node.args[0], "id", None) == "manifest"
+                and isinstance(node.args[1], ast.Constant)}
+        assert {"points", OLD_SUBJECTS} <= read

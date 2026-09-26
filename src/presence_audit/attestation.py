@@ -316,7 +316,10 @@ def _declared_name(entity_id: str, manifest: Any) -> str:
     """
     points = getattr(manifest, "points", None)
     if points is None:                        # a manifest older than the rename
-        points = getattr(manifest, _renames.PUBLISHED_SUBJECTS, ())
+        # The old member by its LITERAL name: a consumer derives what this
+        # builder reads off its source, and a name held in a variable is one
+        # that derivation cannot see.
+        points = getattr(manifest, "sensors", ())
     for point in points:
         if point.entity_type == entity_id:
             return point.declared_name
