@@ -80,10 +80,14 @@ def neutral_kind(kind: str) -> str:
     return NEUTRAL_KINDS.get(kind, kind)
 
 
+#: In the spelling a change CARRIES through the window, which is the spelling
+#: the sites below emit -- written as literals, so the kinds this module emits
+#: can be read off it, and a consumer's suite does exactly that. A kind in the
+#: core's own word is looked up through `PUBLISHED_KINDS` (`is_regression`).
 REGRESSION_KINDS = frozenset({
-    "point_removed", "point_renamed", "reading_lost", "point_disabled",
+    "sensor_removed", "sensor_renamed", "reading_lost", "sensor_disabled",
     "threshold_removed", "threshold_moved", "units_changed",
-} | {PUBLISHED_KINDS[k] for k in ("point_removed", "point_renamed", "point_disabled")})
+})
 
 
 @dataclass(frozen=True, init=False)
@@ -127,8 +131,8 @@ class Change:
         # which of ITS kinds count, and does not get to say that a declared point
         # being absent does not.
         own = _vocabulary.regression_kinds()
-        return (self.kind in REGRESSION_KINDS or self.kind in own
-                or neutral_kind(self.kind) in own)
+        return (PUBLISHED_KINDS.get(self.kind, self.kind) in REGRESSION_KINDS
+                or self.kind in own or neutral_kind(self.kind) in own)
 
     def __str__(self) -> str:
         return f"[{self.kind}] {self.point} -- {self.detail}"
@@ -500,7 +504,7 @@ def _compare_walks(before: Capture, after: Capture, *,
     for old, new in pairs:
         if old.name != new.name and id(new) not in renamed_by_prefix:
             changes.append(Change(
-                PUBLISHED_KINDS["point_renamed"], new.name,
+                "sensor_renamed", new.name,
                 f"reported as {old.name!r} in the earlier capture and "
                 f"{new.name!r} in this one, at the same address. Every dashboard, "
                 f"alert rule and trend query keyed on the old string stops "
@@ -522,12 +526,12 @@ def _compare_walks(before: Capture, after: Capture, *,
             changes.append(shift)
         for old in gone:
             changes.append(Change(
-                PUBLISHED_KINDS["point_removed"], old.name,
+                "sensor_removed", old.name,
                 f"reported at {old.path} in the earlier capture and not reported "
                 f"at all in this one, under any name or address", old.path, None))
         for new in arrived:
             changes.append(Change(
-                PUBLISHED_KINDS["point_added"], new.name,
+                "sensor_added", new.name,
                 f"reported at {new.path} in this walk and absent from the earlier "
                 f"one", None, new.path))
     else:

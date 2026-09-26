@@ -142,3 +142,32 @@ class TestTheDefaultOutputDidNotMove:
     def test_either_spelling_of_a_kind_is_a_regression(self):
         for kind in ("point_removed", OLD_SUBJECT + "_removed"):
             assert regression.Change(kind, "A", "d").is_regression
+
+
+class TestTheKindSetsDidNotMove:
+    """A consumer's suite reads the kinds this module emits off its source -- a
+    literal first argument to `Change(` -- and requires every ranked kind and
+    every regression kind to be one of them. The first build of 0.1.13 listed
+    the core's own spellings beside the published ones and emitted through a
+    lookup, and that suite failed twice in the paired run before release. The
+    sets hold the published spellings through the window; either spelling is
+    accepted wherever a kind is read."""
+
+    def test_the_sets_hold_only_the_published_spellings(self):
+        for kind in (*report.CHANGE_ORDER, *regression.REGRESSION_KINDS):
+            assert kind not in regression.PUBLISHED_KINDS, kind
+
+    def test_the_core_emits_them_as_written(self):
+        import pathlib
+        import re
+        source = pathlib.Path(regression.__file__).read_text(encoding="utf-8")
+        emitted = set(re.findall(r'Change\(\s*"([a-z_]+)"', source))
+        for suffix in ("_removed", "_renamed", "_added"):
+            assert OLD_SUBJECT + suffix in emitted
+
+    def test_a_kind_in_the_cores_word_ranks_beside_its_published_one(self):
+        built = regression.RegressionReport(changes=[
+            regression.Change("threshold_added", "A", "d"),
+            regression.Change("point_removed", "B", "d")])
+        ordered = report._ordered_changes(built)
+        assert [c.kind for c in ordered] == ["point_removed", "threshold_added"]

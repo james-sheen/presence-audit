@@ -365,14 +365,16 @@ def _as_text(report: DiffReport, *, target: str | None = None) -> str:
 
 # Most actionable first, same principle as KIND_ORDER. A removal leads because it
 # is the change a firmware release is most often shipped without noticing.
+#: In the spelling a change carries through the window; a kind in the core's
+#: own word ranks beside its published one (`_ordered_changes`).
 CHANGE_ORDER = (
     # First, because it EXPLAINS the removals below it. A reader who meets forty
     # removals and then the note has already started writing the incident.
     "aggregation_prefix_shift",
-    "point_removed", "sensor_removed",
-    "point_renamed", "sensor_renamed",
+    "sensor_removed",
+    "sensor_renamed",
     "reading_lost",
-    "point_disabled", "sensor_disabled",
+    "sensor_disabled",
     "threshold_removed",
     "threshold_moved",
     "units_changed",
@@ -380,8 +382,8 @@ CHANGE_ORDER = (
     "field_drift",
     "walk_incomplete",
     "threshold_added",
-    "point_enabled", "sensor_enabled",
-    "point_added", "sensor_added",
+    "sensor_enabled",
+    "sensor_added",
     "aggregation_prefix_paired",
 )
 
