@@ -32,4 +32,4 @@ from .protocols import PROTOCOL_VERSION
 # creates exactly the two-records-of-one-fact problem the constants avoid.
 __all__ = ["ENVELOPE_SCHEMA_VERSION", "PROTOCOL_VERSION"]
 
-__version__ = "0.1.12"
+__version__ = "0.1.13"
