@@ -119,6 +119,13 @@ class TestAnUnknownNameIsStillRefused:
         format has no field for a spread, which is false of a file written for
         a build that has one. Under `/3` that build names the true cause, a file
         newer than itself. `/2` is still read: it is `/3` with no spread in it.
+
+        AND TO FIVE, WITH THE ATTESTATION SET AT THREE. `/4` renames the two
+        member keys a redundant group and a counter used -- the first vertical's
+        words -- and carries two blocks no earlier id does, `fault_channels` and
+        `actions`; an older build refuses a `/4` file by its id instead of
+        dropping both blocks. `attestation/2` keys each record on `point` beside
+        the published key. Every earlier id of both is still read, unchanged.
         """
-        assert len(attestation.ACCEPTED_ATTESTATION_FORMATS) == 2
-        assert len(supplemental.ACCEPTED_FORMATS) == 4
+        assert len(attestation.ACCEPTED_ATTESTATION_FORMATS) == 3
+        assert len(supplemental.ACCEPTED_FORMATS) == 5

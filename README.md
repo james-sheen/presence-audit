@@ -268,14 +268,40 @@ the first is a spread on no number, and the engine reads the others as no spread
 at all. The spread reaches the generated model under the engine's own key; its
 basis stays in the file, since the engine has no field for one.
 
-**The keys that still carry another domain's word.** Some keys in the report and
-in the supplemental file are named after the domain this package was extracted
-from. That is a real leak and it is written down here rather than quietly
-repaired. The prose around them has been rewritten in this package's own noun,
-and a test refuses any new instance by deriving the forbidden words from whatever
-verticals are installed — but a KEY is read by name, by code somebody else
-released. Changing one is a format-version change with a window in which both
-spellings are accepted, not an edit made on the way past.
+**Then to five, in 0.1.13, for two new blocks and two renamed keys.**
+`presence-audit/supplemental/4` carries `fault_channels` -- which way a failure
+travels, often the opposite way to a coupling, each with a `basis` and a `weight`
+only where something gives one -- and `actions`, what an operator can set on a
+point and with which `effect`. Every earlier id refuses both by name. It also
+lists a redundant group's members under `points` and names a counter's under
+`point`, where the earlier ids used the first vertical's words; those ids are read
+exactly as before, old keys included.
+
+**The names that carried another domain's word, and the window they are moving
+in.** A record's subject field, five change kinds, the manifest's list, the class
+behind it and those two input keys were all named after the domain this package
+was extracted from, so every other vertical wrote that domain's noun to reach the
+core. From 0.1.13 each has a neutral name -- `point`, `points`, `GeneratedPoint`,
+`point_removed` and its four siblings -- and **every old name still reads through
+the 0.1 line**: the old keyword is accepted, the old attribute answers, both with
+a `DeprecationWarning` naming the replacement. Reports and attestations are
+written as before unless a caller asks for format 2 (`spelled=True`), which keys
+each record on `point` and the vertical's own word and spells each change kind in
+that word -- so the vertical whose word the old keys were gets back exactly the
+kinds it always emitted. **0.2.0 removes the old names**, and every consumer's
+`<0.2` ceiling keeps it out until that consumer has moved.
+
+## Adopting a fitted gain
+
+The engine fits a declared coupling's gain from history and proposes it; it never
+writes the number down. `presence_audit.adopt` is the writer a vertical's own
+command calls to do that: it names the proposal in the file's words, refuses a
+declared number outright, refuses a proposal the replay did not justify unless
+forced -- stamping `adopted_without_replay_gain` or `adopted_untested`, because
+those are two different facts -- writes `gain`, `gain_basis` and the fit's spread,
+and keeps the file only if it loads back carrying them. The calling distribution
+names itself in the basis (`by=`); the command, and the history it fitted from,
+stay in the vertical.
 
 ## Status
 

@@ -24,6 +24,8 @@ import contextvars
 import os
 from typing import Mapping, Optional, Protocol, Sequence
 
+from . import _renames
+
 from .protocols import PROTOCOL_VERSION
 
 
@@ -110,7 +112,7 @@ class Vocabulary(Protocol):
         a vocabulary whose signature accepts it. Without it a finding can only
         be derived from the captured row, and a row that looks wrong on its own
         terms may be a declared kind this audit does not judge -- a meeting
-        reported as an unowned deliverable, because nothing reachable from the
+        reported as an unowned item of work, because nothing reachable from the
         capture said it was a meeting. Taking it is OPTIONAL: every vertical
         published before this takes the capture alone and keeps working.
         """
@@ -121,7 +123,7 @@ class Vocabulary(Protocol):
 
         The generator pairs points it is told are peers; it does not know how a
         domain decides that. One groups by physical part and channel, another
-        might group by tag prefix, and neither belongs in the generator.
+        might group by a name prefix, and neither belongs in the generator.
 
         A domain with no notion of redundancy returns an empty sequence.
         """
@@ -451,8 +453,38 @@ def record_key(plural: bool = False) -> Optional[str]:
     without a compatibility break.
     """
     word = noun()[1 if plural else 0]
-    published = ("sensor", "sensors")[1 if plural else 0]
+    published = (_renames.PUBLISHED_SUBJECT, _renames.PUBLISHED_SUBJECTS)[1 if plural else 0]
     return None if word == published else word
+
+
+def own_key(plural: bool = False) -> Optional[str]:
+    """The domain's own word as a record key in format 2, or None for the core's.
+
+    Format 2 keys every record on `point` first, so this is the word ADDED beside
+    it -- `None` when the domain's word is `point` itself, which is what a
+    vertical supplying no noun gets. Spaces become underscores: a key is read by
+    a program, and a key with a space in it is one every reader has to quote.
+    """
+    word = noun()[1 if plural else 0].strip().lower().replace(" ", "_")
+    neutral = DEFAULT_NOUN[1 if plural else 0]
+    return None if word in ("", neutral) else word
+
+
+def spelled_kind(kind: str) -> str:
+    """A change kind naming a point, spelled in the domain's own word.
+
+    `point_removed` for a domain with no noun of its own, and the domain's word
+    in its place otherwise -- which gives the first vertical back exactly the
+    kinds it has always emitted. Any kind that names no point is returned as it
+    is. Read by the format-2 writers; see `_renames` for the window.
+    """
+    from .regression import neutral_kind
+
+    neutral = neutral_kind(kind)
+    if not neutral.startswith("point_"):
+        return kind
+    word = own_key() or "point"
+    return word + neutral[len("point"):]
 
 
 def registered() -> bool:

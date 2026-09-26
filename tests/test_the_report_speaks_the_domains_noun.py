@@ -93,7 +93,7 @@ def _render(vertical, *, target="line-1"):
     vocabulary.register(vertical)
     built = DiffReport()
     built.findings = [Finding("threshold_missing", "X-1", "a detail", "d.json", "/p/1")]
-    built.not_sensor_kinds = {vertical.kinds[1]: [Excluded("A-1", "spare")]}
+    built.not_point_kinds = {vertical.kinds[1]: [Excluded("A-1", "spare")]}
     return report.as_text(built, target=target)
 
 
@@ -158,7 +158,7 @@ class TestAVerticalThatSuppliesNeither:
         """Ugly beats invisible. The failure being fixed is a count that was
         silently absent, so a key with no label prints under the key itself."""
         built = DiffReport()
-        built.not_sensor_kinds = {"spare": [Excluded("A-1", "spare")]}
+        built.not_point_kinds = {"spare": [Excluded("A-1", "spare")]}
         vocabulary.reset()
         vocabulary.register(Silent(("x", "y"), "spare", "spare_x", "l", "n"))
         assert "spare_x" in report.as_text(built)

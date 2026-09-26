@@ -23,14 +23,14 @@ from __future__ import annotations
 import pytest
 
 from presence_audit.generator import (BOUND_OF_PROBLEM, COMPARISON_PROBLEMS,
-                                      GeneratedSensor, Manifest)
+                                      GeneratedPoint, Manifest)
 
 READING = "reading"
 
 
 @pytest.fixture
 def manifest():
-    return Manifest(domain_id="d", sensors=[GeneratedSensor(
+    return Manifest(domain_id="d", points=[GeneratedPoint(
         entity_type="MB_U73_THERM_LOCAL", declared_name="MB_U73_THERM_LOCAL",
         source="board.json", upper=(49.0, 50.0), lower=(1.0, 0.0))])
 
@@ -117,7 +117,7 @@ class TestTheSetIsTheAxiomsAndNotAGuess:
     def test_a_domain_with_no_critical_bound_omits_the_number(self):
         """Rather than printing None, which is the shape of the defect this
         method already carries a comment about for severities."""
-        bare = Manifest(domain_id="d", sensors=[GeneratedSensor(
+        bare = Manifest(domain_id="d", points=[GeneratedPoint(
             entity_type="P", declared_name="P", source="s.json",
             upper=(9.0, None), lower=(None, None))])
         assert bare.translate_finding(

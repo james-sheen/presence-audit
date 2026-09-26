@@ -34,8 +34,8 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Sequence
 
 from . import vocabulary as _vocabulary
-from .generator import (COUPLING_RELATION, DEFAULT_SAMPLE_INTERVAL_S, READING,
-                        Manifest, peer_property)
+from .generator import (COUPLING_RELATION, DEFAULT_SAMPLE_INTERVAL_S, FAULT_RELATION,
+                        READING, Manifest, peer_property)
 
 __all__ = ["FeedResult", "DetectOutcome", "feed", "unmapped_observations",
            "evaluate", "STUCK_AT_SAMPLE_FLOOR", "ENVELOPE_SCHEMA_VERSION"]
@@ -172,6 +172,9 @@ class FeedResult:
     #: not fed this run -- not reading, or not modelled -- has no edge, and the
     #: run then looks exactly like a run where no coupling was declared.
     couplings_not_fed: list[dict] = field(default_factory=list)
+    #: Declared fault channels that became an edge, and every one that did not.
+    channeled: list[tuple[str, str]] = field(default_factory=list)
+    channels_not_fed: list[dict] = field(default_factory=list)
     #: The grid the observations were stamped on, in seconds. Reported because
     #: a fitted gain is only meaningful against the spacing it was fitted at,
     #: and until 0.1.10 this was 60 whatever the file said.
@@ -288,8 +291,8 @@ def feed(session: Any, manifest: Manifest,
         # otherwise the engine declines `missing_property`, which for this axiom
         # means *the peer is not there* -- a fact Stage 1 has already reported
         # precisely, and re-deriving it here as a mapping bug would be wrong.
-        sensor = next((s for s in manifest.sensors if s.entity_type == entity_type), None)
-        carried = () if sensor is None else sensor.agrees_with + sensor.flow_outputs
+        generated = next((s for s in manifest.points if s.entity_type == entity_type), None)
+        carried = () if generated is None else generated.agrees_with + generated.flow_outputs
         for peer in carried:
             peer_value = readings.get(peer)
             if peer_value is None:
@@ -308,8 +311,8 @@ def feed(session: Any, manifest: Manifest,
         # which reads like a warm-up and never clears. CONSISTENCY needs only the
         # current value, so this is redundant for a pairing and harmless: the model
         # declares the property either way, so nothing goes unread.
-        if sensor is not None and sensor.flow_outputs:
-            for peer in sensor.flow_outputs:
+        if generated is not None and generated.flow_outputs:
+            for peer in generated.flow_outputs:
                 peer_series = history.get(peer, [])
                 if peer_series:
                     session.add_observations(entity_type, peer_property(peer),
@@ -360,6 +363,22 @@ def _wire_couplings(session: Any, manifest: Manifest, result: FeedResult,
             continue
         session.add_relationship(source_type, COUPLING_RELATION, target_type)
         result.coupled.append((source, target))
+
+    # A CAUSAL RULE WITH NO EDGE UNDER IT IS CHECKED AGAINST NOTHING, as a
+    # coupling's is: the edge is what the engine's causal graph is built from.
+    for source, target in manifest.channeled:
+        source_type = manifest.type_for(source)
+        target_type = manifest.type_for(target)
+        absent = [name for name, entity_type in ((source, source_type),
+                                                 (target, target_type))
+                  if entity_type is None or entity_type not in registered]
+        if absent:
+            result.channels_not_fed.append(
+                {"from": source, "to": target, "reason": "endpoint_not_fed",
+                 "missing": absent})
+            continue
+        session.add_relationship(source_type, FAULT_RELATION, target_type)
+        result.channeled.append((source, target))
 
 
 def unmapped_observations(describe: dict) -> list[dict]:
@@ -489,9 +508,9 @@ def evaluate(envelope: dict, describe: dict, manifest: Manifest, *,
     # property on an entity that declares no such peer is still a mapping bug and
     # still reported.
     declared_peers = {
-        (sensor.entity_type, peer_property(peer))
-        for sensor in manifest.sensors
-        for peer in sensor.agrees_with + sensor.flow_outputs}
+        (generated.entity_type, peer_property(peer))
+        for generated in manifest.points
+        for peer in generated.agrees_with + generated.flow_outputs}
 
     for unmapped in unmapped_observations(describe):
         entity = unmapped.get("entity_id", "?")

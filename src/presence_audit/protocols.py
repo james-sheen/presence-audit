@@ -168,7 +168,7 @@ class DeclaredPoint(Protocol):
     def expects_reading(self) -> Optional[bool]:
         """Whether a value is expected. None means the declaration is silent.
 
-        NO COUNTERPART: the second bridge expects every declared tag to read, so
+        NO COUNTERPART: the second bridge expects every declared point to read, so
         its adapter answers None and lets the classifier decide from `type`.
         Three-valued on purpose -- *not declared* is not *declared not to read*.
         """

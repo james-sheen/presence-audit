@@ -217,7 +217,7 @@ class TestADeclarationReachesTheModel:
     def test_the_rule_names_the_generated_types_not_the_declared_names(self):
         model, manifest = _generate(_file())
         rule = model["domain"]["relationship_rules"][0]
-        types = {s.declared_name: s.entity_type for s in manifest.sensors}
+        types = {s.declared_name: s.entity_type for s in manifest.points}
         assert rule["source_type"] == types[DRIVER]
         assert rule["target_type"] == types[DRIVEN]
         assert rule["type"] in model["domain"]["relationship_types"]
@@ -234,7 +234,7 @@ class TestADeclarationReachesTheModel:
         participants already win on."""
         model, manifest = _generate(_file())
         assert DRIVER in model["domain"]["entity_types"]
-        assert not [s for s in manifest.sensors
+        assert not [s for s in manifest.points
                     if s.declared_name == DRIVER and (s.upper != (None, None)
                                                       or s.lower != (None, None))]
 
@@ -395,7 +395,7 @@ class TestAnOlderReaderIsTOLDRatherThanLeftToIgnoreIt:
         path = Path(tempfile.mkdtemp()) / "s.json"
         path.write_text(json.dumps(doc), encoding="utf-8")
         loaded = load_supplemental(path)
-        assert [c.sensor for c in loaded.counters] == ["C"]
+        assert [c.point for c in loaded.counters] == ["C"]
 
     @pytest.mark.parametrize("older", [f for f in ACCEPTED_FORMATS
                                        if "couplings" not in KEYS_BY_FORMAT[f]])

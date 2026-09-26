@@ -67,17 +67,36 @@ rule excludes them -- a point with nothing to bound against is a question nobody
 asked. Naming one in a flow is what asks the question, so a flow participant is
 modelled whether or not it has bounds.
 
+**Fault channels.** `hypothesize` and `infer` rank what could explain a finding along
+the edges an author declared CAUSAL, and nothing in a declaration says which way a
+failure travels. It is often the opposite way to a coupling: a controller that sets a
+fan FROM a temperature couples temperature to fan, while a fan that stops is what makes
+the temperature climb. So a fault channel is its own sentence -- `from` the point whose
+failure can cause the other's -- with a `basis`, and a `weight` only where something
+gives one, with a `weight_basis` beside it. Without a weight the engine declines the
+ranking `cpt_missing`, which is the true answer while nobody has a strength to give.
+
+**Actions.** `plan` and `rollout` act on a model only through templates the model
+declares, and nothing in a declaration says what an operator can set. An action names
+the point it writes, its `effect` (`set`, `add` or `scale`), and a `basis`.
+
+**The member keys were renamed in format 4.** A redundant group listed its members
+under the first vertical's plural and a counter named its point under the singular,
+so every other domain wrote that domain's noun into its own file to be read at all.
+Format 4 calls them `points` and `point`; a vertical's own word is accepted beside
+them, as it was; formats 1 to 3 are read exactly as before, old keys included.
+
 ## The file
 
     {
-      "format": "presence-audit/supplemental/3",
+      "format": "presence-audit/supplemental/4",
       "provenance": "who established this and how",
       "redundant_groups": [
-        {"sensors": ["A", "B"], "tolerance": 0.05,
+        {"points": ["A", "B"], "tolerance": 0.05,
          "basis": "why these are the same measurement"}
       ],
       "counters": [
-        {"sensor": "PWR_ON_HOURS", "direction": "increasing", "allow_reset": true,
+        {"point": "PWR_ON_HOURS", "direction": "increasing", "allow_reset": true,
          "basis": "why this only climbs"}
       ],
       "sampling_interval_s": 300,
@@ -91,6 +110,14 @@ modelled whether or not it has bounds.
          "gain": 0.004, "gain_basis": "what measured the number",
          "gain_sigma": 0.0002, "gain_sigma_basis": "how sure that measurement is",
          "basis": "why the first drives the second"}
+      ],
+      "fault_channels": [
+        {"from": "FAN_POINT", "to": "HEATED_POINT",
+         "basis": "why a failure of the first shows up in the second"}
+      ],
+      "actions": [
+        {"name": "set_fan", "point": "FAN_POINT", "effect": "set",
+         "basis": "what lets an operator set this"}
       ]
     }
 
@@ -112,14 +139,16 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import _renames
 from . import vocabulary as _vocabulary
+from ._renames import UNSET
 
 __all__ = ["ACCEPTED_FORMATS", "KEYS_BY_FORMAT", "COUPLING_KEYS_BY_FORMAT",
            "Supplemental", "RedundantGroup", "Counter", "Coupling",
-           "load_supplemental", "SupplementalError", "FORMAT",
-           "RESPONSE_MODELS", "ESTIMATE"]
+           "FaultChannel", "Action", "load_supplemental", "SupplementalError",
+           "FORMAT", "RESPONSE_MODELS", "ESTIMATE", "EFFECTS"]
 
-FORMAT = "presence-audit/supplemental/3"
+FORMAT = "presence-audit/supplemental/4"
 
 #: Accepted on read, newest first. The earlier ids are still read: their shape is a
 #: SUBSET of this one, so a file written before the move is still this document.
@@ -148,7 +177,14 @@ FORMAT = "presence-audit/supplemental/3"
 #: file written for a build that has one. Under /3 the same build names the real
 #: cause: the file is newer than the build reading it. /2 is still read, because
 #: a /2 document is a /3 document with no spread in it.
-ACCEPTED_FORMATS = (FORMAT, "presence-audit/supplemental/2",
+#:
+#: **/4 RENAMES TWO MEMBER KEYS AND ADDS TWO BLOCKS.** The keys a redundant group
+#: and a counter named their points under were the first vertical's words; /4
+#: calls them `points` and `point`. It also carries `fault_channels` and
+#: `actions`, which no earlier id does -- so an older build refuses a /4 file by
+#: its id rather than loading it and dropping both blocks.
+ACCEPTED_FORMATS = (FORMAT, "presence-audit/supplemental/3",
+                    "presence-audit/supplemental/2",
                     "presence-audit/supplemental/1",
                     "bmc-sensor-audit/supplemental/1")
 
@@ -184,7 +220,27 @@ KEYS_BY_FORMAT = {
     "presence-audit/supplemental/3": frozenset({
         "format", "provenance", "redundant_groups", "counters", "flows",
         "couplings", "sampling_interval_s"}),
+    "presence-audit/supplemental/4": frozenset({
+        "format", "provenance", "redundant_groups", "counters", "flows",
+        "couplings", "sampling_interval_s", "fault_channels", "actions"}),
 }
+
+#: The keys a redundant group lists its members under and a counter names its
+#: point under, per format. /4 has the neutral words; every earlier id keeps the
+#: words it was published with, so a file written for it reads as it always did.
+#: A vertical's own word for the thing it audits is accepted beside either.
+MEMBER_KEYS_BY_FORMAT = {
+    "presence-audit/supplemental/4": ("points", "point"),
+}
+_PUBLISHED_MEMBER_KEYS = (_renames.PUBLISHED_SUBJECTS, _renames.PUBLISHED_SUBJECT)
+
+#: Every key a fault channel and an action may carry.
+FAULT_CHANNEL_KEYS = frozenset({"from", "to", "basis", "weight", "weight_basis"})
+ACTION_KEYS = frozenset({"name", "point", "effect", "settle_s", "basis"})
+
+#: What an action does to the value it writes. The engine's own three verbs,
+#: restated for the reason `RESPONSE_MODELS` is: Stage 1 must not import it.
+EFFECTS = ("set", "add", "scale")
 
 # The engine's own default is 0.05 relative. Restated rather than imported because
 # Stage 1 must not import the engine, and a default that silently tracked an upstream
@@ -223,6 +279,11 @@ COUPLING_KEYS_BY_FORMAT = {
         "response_model", "gain", "gain_basis", "basis",
         "gain_sigma", "gain_sigma_basis",
     }),
+    "presence-audit/supplemental/4": frozenset({
+        "from", "to", "propagation_delay_s", "time_constant_s",
+        "response_model", "gain", "gain_basis", "basis",
+        "gain_sigma", "gain_sigma_basis",
+    }),
 }
 
 #: Every key a coupling may carry under the newest format.
@@ -249,12 +310,29 @@ class SupplementalError(ValueError):
     """The file could not be used. Never a warning: see the module docstring."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class RedundantGroup:
-    sensors: tuple[str, ...]
+    points: tuple[str, ...]
     basis: str
     tolerance: float | None = None
     tolerance_absolute: float | None = None
+
+    def __init__(self, points: tuple[str, ...] = UNSET, basis: str = UNSET,
+                 tolerance: float | None = None,
+                 tolerance_absolute: float | None = None,
+                 *, sensors: tuple[str, ...] = UNSET) -> None:
+        points = _renames.resolve(points, sensors, "RedundantGroup", "sensors", "points")
+        if points is UNSET or basis is UNSET:
+            raise TypeError("RedundantGroup() needs points and basis")
+        object.__setattr__(self, "points", tuple(points))
+        object.__setattr__(self, "basis", basis)
+        object.__setattr__(self, "tolerance", tolerance)
+        object.__setattr__(self, "tolerance_absolute", tolerance_absolute)
+
+    @property
+    def sensors(self) -> tuple[str, ...]:
+        _renames.warn("RedundantGroup", "sensors", "points")
+        return self.points
 
     @property
     def primary(self) -> str:
@@ -265,19 +343,35 @@ class RedundantGroup:
         the same as `b agrees with a` -- so declaring it twice would produce two
         findings for one disagreement and double-count a single drifting point.
         """
-        return self.sensors[0]
+        return self.points[0]
 
     @property
     def peers(self) -> tuple[str, ...]:
-        return self.sensors[1:]
+        return self.points[1:]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class Counter:
-    sensor: str
+    point: str
     basis: str
     direction: str = "increasing"
     allow_reset: bool = True
+
+    def __init__(self, point: str = UNSET, basis: str = UNSET,
+                 direction: str = "increasing", allow_reset: bool = True,
+                 *, sensor: str = UNSET) -> None:
+        point = _renames.resolve(point, sensor, "Counter", "sensor", "point")
+        if point is UNSET or basis is UNSET:
+            raise TypeError("Counter() needs point and basis")
+        object.__setattr__(self, "point", point)
+        object.__setattr__(self, "basis", basis)
+        object.__setattr__(self, "direction", direction)
+        object.__setattr__(self, "allow_reset", allow_reset)
+
+    @property
+    def sensor(self) -> str:
+        _renames.warn("Counter", "sensor", "point")
+        return self.point
 
 
 @dataclass(frozen=True)
@@ -332,6 +426,37 @@ class Coupling:
         return (self.source, self.target)
 
 
+@dataclass(frozen=True)
+class FaultChannel:
+    """A failure of `source` can show up as one of `target`, and why anyone says so.
+
+    `weight` is how strongly, and is absent unless something gives a number:
+    the engine refuses to rank along an edge whose strength it would have to
+    choose, and that refusal is the honest answer until a basis exists.
+    """
+
+    source: str
+    target: str
+    basis: str
+    weight: float | None = None
+    weight_basis: str | None = None
+
+    @property
+    def members(self) -> tuple[str, ...]:
+        return (self.source, self.target)
+
+
+@dataclass(frozen=True)
+class Action:
+    """Something an operator can set on one point, and what it does to it."""
+
+    name: str
+    point: str
+    effect: str
+    basis: str
+    settle_s: float = 0.0
+
+
 @dataclass
 class Supplemental:
     """Operator declarations, and the file they came from."""
@@ -346,10 +471,12 @@ class Supplemental:
     #: declared, because a delay that does not divide it can align no
     #: pair of readings -- see the module docstring.
     sampling_interval_s: float | None = None
+    fault_channels: list[FaultChannel] = field(default_factory=list)
+    actions: list[Action] = field(default_factory=list)
 
     def __bool__(self) -> bool:
         return bool(self.redundant_groups or self.counters or self.flows
-                    or self.couplings)
+                    or self.couplings or self.fault_channels or self.actions)
 
     def flow_for(self, display_name: str) -> Flow | None:
         """The flow this point is the INPUT of, if any. The outputs are carried as
@@ -373,7 +500,11 @@ class Supplemental:
         # rule drops it, and a coupling naming it would then reference an entity
         # type the model does not contain. Naming a point in a coupling is what
         # asks the question, exactly as naming one in a flow is.
-        return names | {name for c in self.couplings for name in c.members}
+        # A FAULT CHANNEL AND AN ACTION NAME POINTS THE SAME WAY: an entity the
+        # engine does not have can be neither a cause nor something acted on.
+        return (names | {name for c in self.couplings for name in c.members}
+                | {name for c in self.fault_channels for name in c.members}
+                | {a.point for a in self.actions})
 
     def group_for(self, display_name: str) -> RedundantGroup | None:
         """The group this point leads, if it leads one."""
@@ -387,22 +518,40 @@ class Supplemental:
 
     def counter_for(self, display_name: str) -> Counter | None:
         for counter in self.counters:
-            if counter.sensor == display_name:
+            if counter.point == display_name:
                 return counter
         return None
 
     def names(self) -> set[str]:
         """Every point name this file mentions, for the cross-check against the
         declaration."""
-        named = {s for group in self.redundant_groups for s in group.sensors}
+        named = {s for group in self.redundant_groups for s in group.points}
         named |= {name for flow in self.flows for name in flow.members}
         named |= {name for c in self.couplings for name in c.members}
-        return named | {c.sensor for c in self.counters}
+        named |= {name for c in self.fault_channels for name in c.members}
+        named |= {a.point for a in self.actions}
+        return named | {c.point for c in self.counters}
 
 
 def _own(plural: bool = False) -> str | None:
     """The domain's own spelling of an input key, or None when it is ours."""
     return _vocabulary.record_key(plural=plural)
+
+
+def _member(block: dict, plural: bool, declared_format: str):
+    """A block's members under its format's key, or the domain's own word.
+
+    /4 names them `points` and `point`, and takes the domain's own word as a
+    format-2 key does; every earlier id reads the words it was published with,
+    exactly as it always has.
+    """
+    keys = MEMBER_KEYS_BY_FORMAT.get(declared_format)
+    if keys is None:
+        return _either(block, _PUBLISHED_MEMBER_KEYS[0 if plural else 1])
+    own = _vocabulary.own_key(plural=plural)
+    if own is not None and own in block:
+        return block[own]
+    return block.get(keys[0 if plural else 1])
 
 
 def _either(block: dict, key: str):
@@ -490,13 +639,13 @@ def load_supplemental(path: str | Path) -> Supplemental:
         where = f"{path}: redundant_groups[{index}]"
         if not isinstance(block, dict):
             raise SupplementalError(f"{where} is not an object")
-        sensors = _either(block, "sensors")
-        if not isinstance(sensors, list) or len(sensors) < 2:
+        members = _member(block, True, declared_format)
+        if not isinstance(members, list) or len(members) < 2:
             raise SupplementalError(
-                f"{where} names {sensors!r}; a redundant group needs at least two "
+                f"{where} names {members!r}; a redundant group needs at least two "
                 f"{_vocabulary.noun()[1]}, because the claim is that they agree "
                 f"with each other")
-        if len(set(sensors)) != len(sensors):
+        if len(set(members)) != len(members):
             raise SupplementalError(
                 f"{where} names the same {_vocabulary.noun()[0]} twice; a reading "
                 f"always agrees with itself, so the check would pass while "
@@ -509,7 +658,7 @@ def load_supplemental(path: str | Path) -> Supplemental:
                 f"reads the absolute one and ignores the relative one, so the number "
                 f"written here would not be the number applied")
         result.redundant_groups.append(RedundantGroup(
-            sensors=tuple(str(s) for s in sensors),
+            points=tuple(str(s) for s in members),
             basis=str(_require(block, "basis", where)),
             tolerance=None if tolerance is None else float(tolerance),
             tolerance_absolute=None if absolute is None else float(absolute)))
@@ -705,11 +854,88 @@ def load_supplemental(path: str | Path) -> Supplemental:
             raise SupplementalError(
                 f"{where} declares direction {direction!r}; this build knows "
                 f"{list(_DIRECTIONS)}")
+        named = _member(block, False, declared_format)
+        if named is None or (isinstance(named, str) and not named.strip()):
+            keys = MEMBER_KEYS_BY_FORMAT.get(declared_format, _PUBLISHED_MEMBER_KEYS)
+            raise SupplementalError(
+                f"{where} has no {keys[1]!r}. This file states things the machine "
+                f"does not state about itself, so every entry has to say what "
+                f"establishes it")
         result.counters.append(Counter(
-            sensor=str(_require_named(block, "sensor", where)),
+            point=str(named),
             basis=str(_require(block, "basis", where)),
             direction=direction,
             allow_reset=bool(block.get("allow_reset", True))))
+
+    for index, block in enumerate(raw.get("fault_channels") or []):
+        where = f"{path}: fault_channels[{index}]"
+        if not isinstance(block, dict):
+            raise SupplementalError(f"{where} is not an object")
+        unknown_keys = sorted(set(block) - FAULT_CHANNEL_KEYS)
+        if unknown_keys:
+            raise SupplementalError(
+                f"{where} declares {unknown_keys}, which this block does not read; "
+                f"it reads {sorted(FAULT_CHANNEL_KEYS)}")
+        source = str(_require(block, "from", where))
+        target = str(_require(block, "to", where))
+        if source == target:
+            raise SupplementalError(
+                f"{where} names {source!r} as both ends; a failure explaining "
+                f"itself is not a channel, and the engine refuses the cycle")
+        weight = block.get("weight")
+        weight_basis = block.get("weight_basis")
+        if weight is None:
+            if weight_basis is not None:
+                raise SupplementalError(
+                    f"{where} states a weight_basis and no weight. A basis is what "
+                    f"establishes a number, and there is no number here")
+        else:
+            if isinstance(weight, bool) or not isinstance(weight, (int, float)) \
+                    or not 0 < float(weight) <= 1:
+                raise SupplementalError(
+                    f"{where} declares weight {weight!r}; it is the chance a failure "
+                    f"at one end reaches the other, a number above 0 and at most 1")
+            if not str(weight_basis or "").strip():
+                raise SupplementalError(
+                    f"{where} states a weight and no weight_basis. A strength with "
+                    f"nothing establishing it is the guess the engine refuses to "
+                    f"make itself; leave it out and the ranking says so by name")
+            weight = float(weight)
+        result.fault_channels.append(FaultChannel(
+            source=source, target=target,
+            basis=str(_require(block, "basis", where)),
+            weight=weight,
+            weight_basis=None if weight_basis is None else str(weight_basis)))
+
+    for index, block in enumerate(raw.get("actions") or []):
+        where = f"{path}: actions[{index}]"
+        if not isinstance(block, dict):
+            raise SupplementalError(f"{where} is not an object")
+        own = _vocabulary.own_key()
+        readable = ACTION_KEYS | ({own} if own else set())
+        unknown_keys = sorted(set(block) - readable)
+        if unknown_keys:
+            raise SupplementalError(
+                f"{where} declares {unknown_keys}, which this block does not read; "
+                f"it reads {sorted(readable)}")
+        point = block.get(own) if own and own in block else block.get("point")
+        if not str(point or "").strip():
+            raise SupplementalError(f"{where} names no point to act on")
+        effect = str(block.get("effect") or "set")
+        if effect not in EFFECTS:
+            raise SupplementalError(
+                f"{where} declares effect {effect!r}; an action does one of "
+                f"{list(EFFECTS)} to the value it writes")
+        settle = block.get("settle_s", 0.0)
+        if isinstance(settle, bool) or not isinstance(settle, (int, float)) \
+                or float(settle) < 0:
+            raise SupplementalError(
+                f"{where} declares settle_s {settle!r}; it is how long the value "
+                f"takes to arrive, a number of seconds, zero for a step")
+        result.actions.append(Action(
+            name=str(_require(block, "name", where)), point=str(point),
+            effect=effect, basis=str(_require(block, "basis", where)),
+            settle_s=float(settle)))
 
     return result
 

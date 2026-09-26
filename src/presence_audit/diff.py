@@ -34,7 +34,9 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Sequence
 
 from .protocols import DeclarationSource, DeclaredPoint
+from . import _renames
 from . import vocabulary as _vocabulary
+from ._renames import UNSET
 from .protocols import Capture, CapturedPoint
 
 __all__ = ["Finding", "Match", "DiffReport", "compare", "normalise_name",
@@ -56,13 +58,39 @@ _SEPARATORS = re.compile(r"[\s_\-]+")
 # variables than the reader silently wildcards the difference.
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class Finding:
+    """One thing the comparison found, about one point.
+
+    `point` names it. The field was published under the first vertical's word
+    for what it audits, and that name still reads -- as a keyword and as an
+    attribute, with a `DeprecationWarning` -- until 0.2.0 (see `_renames`).
+    """
+
     kind: str
-    sensor: str
+    point: str
     detail: str
     declared_in: str | None = None
     live_path: str | None = None
+
+    def __init__(self, kind: str, point: str = UNSET, detail: str = UNSET,
+                 declared_in: str | None = None, live_path: str | None = None,
+                 *, sensor: str = UNSET) -> None:
+        point = _renames.resolve(point, sensor, "Finding", "sensor", "point")
+        missing = [name for name, value in (("point", point), ("detail", detail))
+                   if value is UNSET]
+        if missing:
+            raise TypeError(f"Finding() missing required argument(s): {', '.join(missing)}")
+        object.__setattr__(self, "kind", kind)
+        object.__setattr__(self, "point", point)
+        object.__setattr__(self, "detail", detail)
+        object.__setattr__(self, "declared_in", declared_in)
+        object.__setattr__(self, "live_path", live_path)
+
+    @property
+    def sensor(self) -> str:
+        _renames.warn("Finding", "sensor", "point")
+        return self.point
 
     @property
     def is_regression(self) -> bool:
@@ -76,7 +104,7 @@ class Finding:
                 or self.kind in _vocabulary.regression_kinds())
 
     def __str__(self) -> str:
-        return f"[{self.kind}] {self.sensor} -- {self.detail}"
+        return f"[{self.kind}] {self.point} -- {self.detail}"
 
 
 @dataclass(frozen=True)
@@ -97,7 +125,7 @@ class DiffReport:
     # Declarations excluded from expectation because their Type does not produce a
     # reading, keyed by kind. Reported, never silently dropped -- an exclusion
     # nobody can see is indistinguishable from a checker that forgot to look.
-    not_sensor_kinds: dict[str, list] = field(default_factory=dict)
+    not_point_kinds: dict[str, list] = field(default_factory=dict)
     #: The vocabulary this report was BUILT with, when the caller supplied one.
     #:
     #: A report is read after the call that made it returns, and `counts()`
@@ -116,6 +144,16 @@ class DiffReport:
     # who cannot tell a manufacturer's declaration from a snapshot of one machine is
     # being handed the second while reading it as the first.
     declaration_sources: list = field(default_factory=list)
+
+    @property
+    def not_sensor_kinds(self) -> dict[str, list]:
+        _renames.warn("DiffReport", "not_sensor_kinds", "not_point_kinds")
+        return self.not_point_kinds
+
+    @not_sensor_kinds.setter
+    def not_sensor_kinds(self, value: dict[str, list]) -> None:
+        _renames.warn("DiffReport", "not_sensor_kinds", "not_point_kinds")
+        self.not_point_kinds = value
 
     @property
     def regressions(self) -> list[Finding]:
@@ -141,7 +179,7 @@ class DiffReport:
             "undeclared_present": len(self.unmatched_live),
             # The kinds a vertical reports separately, under the names IT gives
             # them. Naming them here is what made this module know about BMCs.
-            **{key: len(self.not_sensor_kinds.get(kind, []))
+            **{key: len(self.not_point_kinds.get(kind, []))
                for kind, key in _vocabulary.member("count_keys").items()},
             "findings": len(self.findings),
             "regressions": len(self.regressions),
@@ -180,10 +218,10 @@ def _index_live(walk: Capture) -> tuple[dict[str, CapturedPoint],
     exact: dict[str, CapturedPoint] = {}
     normalised: dict[str, CapturedPoint] = {}
     seen: dict[str, int] = {}
-    for sensor in walk.points:
-        exact.setdefault(sensor.name, sensor)
-        normalised.setdefault(normalise_name(sensor.name), sensor)
-        seen[sensor.name] = seen.get(sensor.name, 0) + 1
+    for point in walk.points:
+        exact.setdefault(point.name, point)
+        normalised.setdefault(normalise_name(point.name), point)
+        seen[point.name] = seen.get(point.name, 0) + 1
     return exact, normalised, {name: n for name, n in seen.items() if n > 1}
 
 
@@ -218,9 +256,9 @@ def _pair(declaration: Iterable[DeclaredPoint], walk: Capture) -> tuple[
         pattern = _vocabulary.member("template_pattern")(declared.name)
         hit = None
         if pattern is not None:
-            for sensor in walk.points:
-                if sensor.path not in claimed and pattern.match(sensor.name):
-                    hit = sensor
+            for point in walk.points:
+                if point.path not in claimed and pattern.match(point.name):
+                    hit = point
                     break
         if hit is not None:
             claimed.add(hit.path)
@@ -262,7 +300,7 @@ def _close(a: float, b: float, *, rel: float = 1e-6) -> bool:
     return abs(a - b) <= rel * max(1.0, abs(a), abs(b))
 
 
-def expects_reading(sensor: DeclaredPoint) -> bool:
+def expects_reading(point: DeclaredPoint) -> bool:
     """Whether absence of this declaration should count as a regression.
 
     **The type filter is a fact about ONE declaration format, not about
@@ -281,9 +319,9 @@ def expects_reading(sensor: DeclaredPoint) -> bool:
     So the source says. `expects_reading is None` means decide from `type`, which is
     the case for a format that carries one, and the default.
     """
-    if sensor.expects_reading is not None:
-        return sensor.expects_reading
-    return _vocabulary.member("is_expected_live")(sensor.type)
+    if point.expects_reading is not None:
+        return point.expects_reading
+    return _vocabulary.member("is_expected_live")(point.type)
 
 
 def _classify_excluded(declared: list) -> dict:
@@ -294,11 +332,11 @@ def _classify_excluded(declared: list) -> dict:
     nobody can challenge.
     """
     excluded: dict = {}
-    for sensor in declared:
-        if expects_reading(sensor):
+    for point in declared:
+        if expects_reading(point):
             continue
-        kind = _vocabulary.member("classify")(sensor.type)
-        excluded.setdefault(kind, []).append(sensor)
+        kind = _vocabulary.member("classify")(point.type)
+        excluded.setdefault(kind, []).append(point)
     return excluded
 
 
@@ -397,22 +435,22 @@ def _compare(declaration: DeclarationSource, walk: Capture, *,
     # seen into whichever bucket the default happens to be. An unrecognised type is
     # counted and REPORTED, never asserted about: claiming a regression for
     # something we cannot classify is the exact false positive being removed here.
-    report.not_sensor_kinds = _classify_excluded(unmatched_declared)
+    report.not_point_kinds = _classify_excluded(unmatched_declared)
     unmatched_declared = [s for s in unmatched_declared if expects_reading(s)]
 
     # Anything wrong with the declaration itself travels into the report. A
     # defect in the expectation source is a finding no reading-watcher can see.
     for anomaly in declaration.anomalies:
         findings.append(Finding(
-            anomaly.kind, anomaly.sensor or "(config)", anomaly.detail, anomaly.source))
+            anomaly.kind, _subject(anomaly) or "(config)", anomaly.detail, anomaly.source))
     # Findings only this domain can produce from its own capture. The diff does
     # not know what they are; it knows they belong beside its own.
     #
     # THE DECLARATION IS OFFERED, because a domain finding can depend on what a
     # point was declared as and this hook used to receive the capture alone. Its
-    # only caller has held both all along: a vertical auditing deliverables
-    # reported a meeting as an unowned deliverable, because the tracker row was
-    # all it could see and the declaration knew the row was a ceremony. No other
+    # only caller has held both all along: one vertical reported a scheduled
+    # meeting as an unowned item of work, because the tracker row was all it
+    # could see and the declaration knew the row was a ceremony. No other
     # member carries both halves, so there was no way to express the finding.
     #
     # Passed only to a vocabulary that asks for it, by signature. A vertical
@@ -491,3 +529,15 @@ def _compare(declaration: DeclarationSource, walk: Capture, *,
 
     report.findings = findings
     return report
+
+
+def _subject(record: object) -> str | None:
+    """The point a vertical's own record names, under either spelling.
+
+    A declaration's anomalies are the vertical's own objects, read by attribute.
+    The core now reads `point`; the first vertical's records carry its own word,
+    which is read too until 0.2.0 -- without a warning, because the object is the
+    vertical's and not a name this package published.
+    """
+    value = getattr(record, "point", None)
+    return value if value is not None else getattr(record, "sensor", None)

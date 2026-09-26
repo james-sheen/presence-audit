@@ -91,7 +91,7 @@ class TestTheCoreServesADomainItWasNotWrittenFor:
             f"the core did not produce a presence diff for this domain: {kinds}")
 
     def test_each_of_the_three_lands_on_the_right_tag(self, foreign_report):
-        by_kind = {f.kind: f.sensor for f in foreign_report.findings}
+        by_kind = {f.kind: f.point for f in foreign_report.findings}
         assert by_kind["declared_unreadable"] == "line1.gap"
         assert by_kind["declared_absent"] == "line1.absent"
         assert by_kind["undeclared_present"] == "line1.rogue"

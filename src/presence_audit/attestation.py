@@ -36,12 +36,18 @@ from __future__ import annotations
 from typing import Any
 
 from . import exit_contract
+from . import _renames
 from . import vocabulary as _vocabulary
 
 __all__ = ["build_attestation", "validate_attestation", "ATTESTATION_FORMAT",
-           "ACCEPTED_ATTESTATION_FORMATS"]
+           "ATTESTATION_FORMAT_2", "ACCEPTED_ATTESTATION_FORMATS"]
 
 ATTESTATION_FORMAT = "presence-audit/attestation/1"
+
+#: What `build_attestation(..., spelled=True)` writes: each record keyed on
+#: `point` and on the vertical's own word, the published key beside them through
+#: the window. 0.2.0 writes only this. See `_renames`.
+ATTESTATION_FORMAT_2 = "presence-audit/attestation/2"
 
 #: Formats this build ACCEPTS on read, newest first.
 #:
@@ -55,6 +61,7 @@ ATTESTATION_FORMAT = "presence-audit/attestation/1"
 #: being accepted when somebody can show nothing writes it any more, which is a
 #: measurement rather than a schedule.
 ACCEPTED_ATTESTATION_FORMATS = (
+    ATTESTATION_FORMAT_2,
     ATTESTATION_FORMAT,
     "bmc-sensor-audit/attestation/1",
 )
@@ -175,7 +182,8 @@ def _verdict_problems(block: Any) -> list[str]:
 
 def build_attestation(session: Any, envelope: dict, describe: dict,
                       manifest: Any, *, target: str,
-                      attest_fn: Any, verdict: Any = None) -> dict:
+                      attest_fn: Any, verdict: Any = None,
+                      spelled: bool = False) -> dict:
     """Assemble the artifact from an envelope `check()` has already produced.
 
     `attest_fn` is passed in rather than imported, because this module must not
@@ -194,6 +202,9 @@ def build_attestation(session: Any, envelope: dict, describe: dict,
     scored_by=...)`. A vertical that needed this before invented a key name, and
     the next one would have invented a different one: two artifacts both carrying
     a verdict that no single reader could read.
+
+    `spelled=True` writes format 2 (`ATTESTATION_FORMAT_2`), keyed as a format-2
+    report is. The default is format 1, unchanged, until 0.2.0.
     """
     problem_types = []
     for finding in envelope.get("findings") or []:
@@ -213,10 +224,10 @@ def build_attestation(session: Any, envelope: dict, describe: dict,
             unattested.append(f"{problem_type}: {meta.get('reason', 'unavailable')}")
             continue
         for entry in attested.get("evidence") or []:
-            evidence.append(_render(entry, manifest))
+            evidence.append(_render(entry, manifest, spelled))
 
     artifact = {
-        "format": ATTESTATION_FORMAT,
+        "format": ATTESTATION_FORMAT_2 if spelled else ATTESTATION_FORMAT,
         "target": target,
         "engine": {
             "schema_version": (envelope.get("meta") or {}).get("schema_version"),
@@ -226,10 +237,11 @@ def build_attestation(session: Any, envelope: dict, describe: dict,
             "boundary": _boundary(evidence),
         },
         "checked": envelope.get("checked") or {},
-        "findings": [_finding(f, manifest) for f in envelope.get("findings") or []],
+        "findings": [_finding(f, manifest, spelled)
+                     for f in envelope.get("findings") or []],
         # The half a compliance reader needs. An axiom that could not be evaluated is
         # not an axiom that passed.
-        "not_checked": [_decline(d, manifest)
+        "not_checked": [_decline(d, manifest, spelled)
                         for d in (envelope.get("not_checked")
                                   or envelope.get("declines") or [])],
         "evidence": evidence,
@@ -266,6 +278,18 @@ def verdict_block(exit_code: int, *, scored_by: str) -> dict:
     return block
 
 
+def _subject_keys(value: Any, spelled: bool) -> dict:
+    """The keys a record names its point under -- as a format-2 report does."""
+    if not spelled:
+        return {_renames.PUBLISHED_SUBJECT: value, **_own_key(value)}
+    keys: dict = {"point": value}
+    own = _vocabulary.own_key()
+    if own and own != "point":
+        keys[own] = value
+    keys.setdefault(_renames.PUBLISHED_SUBJECT, value)
+    return keys
+
+
 def _own_key(value: Any) -> dict:
     """The domain's own key beside the published one, or nothing.
 
@@ -284,15 +308,18 @@ def _boundary(evidence: list[dict]) -> str | None:
     return None
 
 
-def _sensor(entity_id: str, manifest: Any) -> str:
-    """The name on the board, not the sanitised entity type.
+def _declared_name(entity_id: str, manifest: Any) -> str:
+    """The name the declaration gave, not the sanitised entity type.
 
     An artifact naming `MB_U73_THERM_LOCAL_2` is one nobody can act on six months
     later, which is the whole failure mode a per-run record exists to avoid.
     """
-    for sensor in getattr(manifest, "sensors", ()):
-        if sensor.entity_type == entity_id:
-            return sensor.declared_name
+    points = getattr(manifest, "points", None)
+    if points is None:                        # a manifest older than the rename
+        points = getattr(manifest, _renames.PUBLISHED_SUBJECTS, ())
+    for point in points:
+        if point.entity_type == entity_id:
+            return point.declared_name
     return entity_id
 
 
@@ -317,14 +344,14 @@ def _statement(record: dict, manifest: Any) -> str | None:
     return record.get("problem_type")
 
 
-def _finding(finding: dict, manifest: Any) -> dict:
-    name = _sensor(finding.get("entity_id", "?"), manifest)
-    return {"sensor": name, **_own_key(name),
+def _finding(finding: dict, manifest: Any, spelled: bool = False) -> dict:
+    name = _declared_name(finding.get("entity_id", "?"), manifest)
+    return {**_subject_keys(name, spelled),
             # THE ENGINE'S SENSE OF THE WORD, which is the envelope this record
             # is built from. It held `entity_id` -- the manifest's sense, where
             # `entity_type` is the sanitised identifier -- so the artifact
             # carried an identifier under a name that says it is a class, one key
-            # away from the field `_sensor` exists to keep out of the artifact.
+            # away from the field `_declared_name` exists to keep out of the artifact.
             # Empty on findings from an engine that does not classify them, which
             # is honest; the published name key carries it either way.
             "entity_type": finding.get("entity_type"),
@@ -338,7 +365,7 @@ def _finding(finding: dict, manifest: Any) -> dict:
 _DECLINE_NAMED = ("entity_id", "entity_type", "indicator", "axiom", "reason", "detail")
 
 
-def _decline(decline: dict, manifest: Any) -> dict:
+def _decline(decline: dict, manifest: Any, spelled: bool = False) -> dict:
     """One declined evaluation, with the fields that make two of them two.
 
     This kept FOUR keys of the thirteen a decline carries, and `indicator` was
@@ -356,8 +383,8 @@ def _decline(decline: dict, manifest: Any) -> dict:
     """
     measurement = {key: value for key, value in decline.items()
                    if key not in _DECLINE_NAMED}
-    name = _sensor(decline.get("entity_id", "?"), manifest)
-    row = {"sensor": name, **_own_key(name),
+    name = _declared_name(decline.get("entity_id", "?"), manifest)
+    row = {**_subject_keys(name, spelled),
            "entity_type": decline.get("entity_type"),
            "indicator": decline.get("indicator"),
            "axiom": decline.get("axiom"),
@@ -368,10 +395,10 @@ def _decline(decline: dict, manifest: Any) -> dict:
     return row
 
 
-def _render(entry: dict, manifest: Any) -> dict:
+def _render(entry: dict, manifest: Any, spelled: bool = False) -> dict:
     inner = entry.get("evidence") or {}
-    name = _sensor(entry.get("entity_id", "?"), manifest)
-    return {"sensor": name, **_own_key(name),
+    name = _declared_name(entry.get("entity_id", "?"), manifest)
+    return {**_subject_keys(name, spelled),
             "axiom": entry.get("axiom"),
             "problem_type": entry.get("problem_type"),
             "confidence": entry.get("confidence"),

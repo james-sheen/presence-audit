@@ -62,16 +62,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from . import _renames
 from . import vocabulary as _vocabulary
+from .diff import _subject
 from .protocols import DeclarationSource, DeclaredPoint
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .supplemental import Supplemental
 
-__all__ = ["GeneratedSensor", "Manifest", "generate", "BOUND_OF_PROBLEM",
+__all__ = ["GeneratedPoint", "Manifest", "generate", "BOUND_OF_PROBLEM",
            "COMPARISON_PROBLEMS", "peer_property", "PEER_PREFIX",
            "window_for", "WINDOW_SAMPLES", "DEFAULT_SAMPLE_INTERVAL_S",
-           "COUPLING_RELATION"]
+           "COUPLING_RELATION", "FAULT_RELATION"]
 
 READING = "reading"
 
@@ -79,6 +81,11 @@ READING = "reading"
 #: this module cannot see the domain, and a domain's own word here would be a
 #: statement about every other domain that is false.
 COUPLING_RELATION = "drives"
+
+#: The relationship a declared fault channel becomes: a failure at the source
+#: can show up at the target. Declared CAUSAL, so `infer` and `hypothesize`
+#: rank along it and along nothing the file did not state.
+FAULT_RELATION = "can_fail_into"
 
 #: The projector put on a coupling's DRIVER. A rollout that lets the world drift
 #: needs one or it completes nought steps, declining `model_missing` -- measured. It
@@ -201,7 +208,7 @@ def _entity_type(name: str, taken: set[str]) -> str:
 
 
 @dataclass(frozen=True)
-class GeneratedSensor:
+class GeneratedPoint:
     entity_type: str
     declared_name: str
     source: str
@@ -222,7 +229,7 @@ class Manifest:
     """What was generated, and everything that was not."""
 
     domain_id: str
-    sensors: list[GeneratedSensor] = field(default_factory=list)
+    points: list[GeneratedPoint] = field(default_factory=list)
     excluded: dict[str, list[str]] = field(default_factory=dict)
     anomalies: list[str] = field(default_factory=list)
     expect_variation: bool = True
@@ -236,6 +243,13 @@ class Manifest:
     #: endpoint was excluded leaves a file declaring a chain the model does not
     #: contain, and a rollout that reports nothing because it was asked nothing.
     uncoupled: list[dict] = field(default_factory=list)
+    #: Fault channels that became a causal rule, as (from, to) DISPLAY names, and
+    #: every one that did not, with the reason -- as couplings are.
+    channeled: list[tuple[str, str]] = field(default_factory=list)
+    unchanneled: list[dict] = field(default_factory=list)
+    #: Actions that became a template, by name, and every one that did not.
+    actions: list[str] = field(default_factory=list)
+    unacted: list[dict] = field(default_factory=list)
     #: THE CADENCE THE COLLECTOR WALKS AT, carried from the supplemental so the
     #: feeder can stamp observations at it.
     #:
@@ -247,20 +261,34 @@ class Manifest:
     #: nobody declared anything would be this file choosing a number.
     sampling_interval_s: float | None = None
 
-    def exclude(self, reason: str, sensor: DeclaredPoint) -> None:
-        self.excluded.setdefault(reason, []).append(sensor.display_name)
+    @property
+    def sensors(self) -> list[GeneratedPoint]:
+        """The published name of `points`, readable until 0.2.0."""
+        _renames.warn("Manifest", "sensors", "points")
+        return self.points
+
+    def exclude(self, reason: str, point: DeclaredPoint) -> None:
+        self.excluded.setdefault(reason, []).append(point.display_name)
 
     def counts(self) -> dict[str, int]:
-        counts = {"generated": len(self.sensors),
-                  "with_lower_bound": sum(1 for s in self.sensors if s.has_lower),
-                  "unmapped_levels": sum(len(s.unmapped_levels) for s in self.sensors),
+        counts = {"generated": len(self.points),
+                  "with_lower_bound": sum(1 for s in self.points if s.has_lower),
+                  "unmapped_levels": sum(len(s.unmapped_levels) for s in self.points),
                   "anomalies": len(self.anomalies),
-                  "redundant_groups": sum(1 for s in self.sensors if s.agrees_with),
-                  "counters": sum(1 for s in self.sensors if s.counter),
-                  "flows": sum(1 for s in self.sensors if s.flow_outputs),
+                  "redundant_groups": sum(1 for s in self.points if s.agrees_with),
+                  "counters": sum(1 for s in self.points if s.counter),
+                  "flows": sum(1 for s in self.points if s.flow_outputs),
                   "pairing_candidates": len(self.candidates),
                   "couplings": len(self.coupled),
                   "couplings_not_expressed": len(self.uncoupled)}
+        # Counted only where declared, so a file without these blocks produces
+        # the manifest it always did, byte for byte.
+        if self.channeled or self.unchanneled:
+            counts["fault_channels"] = len(self.channeled)
+            counts["fault_channels_not_expressed"] = len(self.unchanneled)
+        if self.actions or self.unacted:
+            counts["actions"] = len(self.actions)
+            counts["actions_not_expressed"] = len(self.unacted)
         for reason, names in self.excluded.items():
             counts[f"excluded_{reason}"] = len(names)
         return counts
@@ -278,6 +306,16 @@ class Manifest:
         is the whole reason that check exists: a new artifact is a new way for identity
         to escape, and the model and manifest were both new today.
         """
+        generated = [{"entity_type": s.entity_type,
+                      "declared_name": s.declared_name,
+                      "source": Path(s.source).name if s.source else None,
+                      "upper": list(s.upper),
+                      "lower": list(s.lower),
+                      "unmapped_levels": [list(u) for u in s.unmapped_levels],
+                      "agrees_with": list(s.agrees_with),
+                      "counter": s.counter,
+                      "flow_outputs": list(s.flow_outputs)}
+                     for s in self.points]
         return {
             "domain_id": self.domain_id,
             "expect_variation": self.expect_variation,
@@ -287,16 +325,15 @@ class Manifest:
             "counts": self.counts(),
             "coupled": [list(pair) for pair in self.coupled],
             "uncoupled": list(self.uncoupled),
-            "sensors": [{"entity_type": s.entity_type,
-                         "declared_name": s.declared_name,
-                         "source": Path(s.source).name if s.source else None,
-                         "upper": list(s.upper),
-                         "lower": list(s.lower),
-                         "unmapped_levels": [list(u) for u in s.unmapped_levels],
-                         "agrees_with": list(s.agrees_with),
-                         "counter": s.counter,
-                         "flow_outputs": list(s.flow_outputs)}
-                        for s in self.sensors],
+            **({"channeled": [list(pair) for pair in self.channeled],
+                "unchanneled": list(self.unchanneled)}
+               if self.channeled or self.unchanneled else {}),
+            **({"actions": list(self.actions), "unacted": list(self.unacted)}
+               if self.actions or self.unacted else {}),
+            # The published key and, from 0.1.13, the neutral one beside it.
+            # A reader moves to `points` inside the window; 0.2.0 writes only it.
+            _renames.PUBLISHED_SUBJECTS: generated,
+            "points": generated,
             "excluded": {reason: list(names)
                          for reason, names in self.excluded.items()},
             "anomalies": list(self.anomalies),
@@ -304,9 +341,9 @@ class Manifest:
         }
 
     def type_for(self, declared_name: str) -> str | None:
-        for sensor in self.sensors:
-            if sensor.declared_name == declared_name:
-                return sensor.entity_type
+        for point in self.points:
+            if point.declared_name == declared_name:
+                return point.entity_type
         return None
 
     def translate_finding(self, finding: dict) -> str:
@@ -334,8 +371,8 @@ class Manifest:
         severity = finding.get("severity", "")
         reason = str(finding.get("reason") or "")
 
-        sensor = next((s for s in self.sensors if s.entity_type == entity_type), None)
-        if sensor is None or not indicator:
+        point = next((s for s in self.points if s.entity_type == entity_type), None)
+        if point is None or not indicator:
             return reason or problem or "unattributable finding"
 
         side = BOUND_OF_PROBLEM.get(kind)
@@ -349,11 +386,11 @@ class Manifest:
             # sanitised property key the feeder invented. Left alone, the one finding
             # whose whole value is *these two disagree* would name one point an
             # operator recognises and one string that appears nowhere on the board.
-            for peer in sensor.agrees_with:
+            for peer in point.agrees_with:
                 text = text.replace(peer_property(peer), peer)
-            return f"{sensor.declared_name}: {text}"
+            return f"{point.declared_name}: {text}"
 
-        bounds = sensor.lower if side == "lower" else sensor.upper
+        bounds = point.lower if side == "lower" else point.upper
         # `severity` is the engine's vocabulary, not ours: `high` turns up on the two
         # trend arms alongside `warning` and `critical`. Mapping an unknown severity
         # onto the nearest slot printed a real number under the wrong name -- `upper
@@ -375,7 +412,7 @@ class Manifest:
             # package maps, which is why the old sentence printed the level and
             # no number at all.
             toward = "upper" if side == "upper" else "lower"
-            text = (f"{sensor.declared_name} has not reached its {toward} "
+            text = (f"{point.declared_name} has not reached its {toward} "
                     f"critical bound")
             return text + (f" of {bounds[1]} and is trending toward it"
                            if bounds[1] is not None else " and is trending toward it")
@@ -398,7 +435,7 @@ class Manifest:
             # unusual pairing, it is the untouched case.
             direction = ("at or BELOW its lower" if side == "lower"
                          else "at or above its upper")
-        text = f"{sensor.declared_name} is {direction} {severity} bound"
+        text = f"{point.declared_name} is {direction} {severity} bound"
         return text + (f" of {bound}" if bound is not None else "")
 
     def type_for_entity(self, entity_id: str) -> str | None:
@@ -407,9 +444,9 @@ class Manifest:
         The feeder names entities after the point, so the type is recoverable; this
         exists so the lookup has one home when the feeder lands in Phase 2.
         """
-        for sensor in self.sensors:
-            if sensor.entity_type == entity_id or sensor.declared_name == entity_id:
-                return sensor.entity_type
+        for point in self.points:
+            if point.entity_type == entity_id or point.declared_name == entity_id:
+                return point.entity_type
         return None
 
     def describe_indicator(self, entity_type: str, indicator: str) -> str:
@@ -419,17 +456,17 @@ class Manifest:
         rather than the un-negation it used to be. It stays because the engine names
         the sanitised entity type and an operator knows the name on the board.
         """
-        for sensor in self.sensors:
-            if sensor.entity_type == entity_type:
-                return sensor.declared_name
+        for point in self.points:
+            if point.entity_type == entity_type:
+                return point.declared_name
         return f"{entity_type}.{indicator}"
 
 
-def _bounds(sensor: DeclaredPoint):
+def _bounds(point: DeclaredPoint):
     upper: dict[str, float] = {}
     lower: dict[str, float] = {}
     unmapped: list[tuple[str, str, float]] = []
-    for threshold in sensor.thresholds:
+    for threshold in point.thresholds:
         if threshold.bound is None or threshold.level is None:
             continue
         if threshold.level not in _MAPPED_LEVELS:
@@ -540,27 +577,27 @@ def _generate(declaration: DeclarationSource, *, domain_id: str,
     indicators: dict[str, list[dict]] = {}
 
     for anomaly in declaration.anomalies:
-        manifest.anomalies.append(f"[{anomaly.kind}] {anomaly.sensor or '(config)'}: "
+        manifest.anomalies.append(f"[{anomaly.kind}] {_subject(anomaly) or '(config)'}: "
                                   f"{anomaly.detail}")
 
-    for sensor in declaration.points:
-        if sensor.is_templated:
+    for point in declaration.points:
+        if point.is_templated:
             # Never fed. A `$bus` name becomes an entity type nothing can match, and
             # the engine cannot tell you that it will never fire.
-            manifest.exclude("templated_name", sensor)
+            manifest.exclude("templated_name", point)
             continue
         supplied = _vocabulary.current()
-        kind = supplied.classify(sensor.type)
+        kind = supplied.classify(point.type)
         if not supplied.is_auditable(kind):
-            manifest.exclude(kind, sensor)
+            manifest.exclude(kind, point)
             continue
-        if sensor.disabled:
-            manifest.exclude("disabled_in_config", sensor)
+        if point.disabled:
+            manifest.exclude("disabled_in_config", point)
             continue
 
-        upper, lower, unmapped = _bounds(sensor)
+        upper, lower, unmapped = _bounds(point)
         if upper == (None, None) and lower == (None, None) \
-                and sensor.display_name not in modelled_regardless:
+                and point.display_name not in modelled_regardless:
             # Nothing to bound against. Generating an indicator anyway would add an
             # invariant the engine can only decline, inflating the denominator with
             # questions nobody asked.
@@ -569,17 +606,17 @@ def _generate(declaration: DeclarationSource, *, domain_id: str,
             # `pin` and `pout1` with bounds on neither, so this rule would exclude
             # exactly the readings a conservation check needs and leave a declared
             # check that never runs.
-            manifest.exclude("no_thresholds", sensor)
+            manifest.exclude("no_thresholds", point)
             continue
 
-        entity_type = _entity_type(sensor.display_name, taken)
+        entity_type = _entity_type(point.display_name, taken)
         entity_types.append(entity_type)
         indicator = _indicator(upper, lower, expect_variation,
                                manifest.sampling_interval_s)
 
-        group = (supplemental.group_for(sensor.display_name)
+        group = (supplemental.group_for(point.display_name)
                  if supplemental is not None else None)
-        counter = (supplemental.counter_for(sensor.display_name)
+        counter = (supplemental.counter_for(point.display_name)
                    if supplemental is not None else None)
         if group is not None:
             # Peers are named as PROPERTIES on this entity, which is what the engine
@@ -598,7 +635,7 @@ def _generate(declaration: DeclarationSource, *, domain_id: str,
             indicator["monotonicity"] = {"expected_direction": counter.direction,
                                          "allow_reset": counter.allow_reset}
 
-        flow = (supplemental.flow_for(sensor.display_name)
+        flow = (supplemental.flow_for(point.display_name)
                 if supplemental is not None else None)
         if flow is not None:
             # The input's own reading is the input property; each output arrives as a
@@ -620,9 +657,9 @@ def _generate(declaration: DeclarationSource, *, domain_id: str,
                                    if a != "BOUNDEDNESS"]
 
         indicators[entity_type] = [indicator]
-        manifest.sensors.append(GeneratedSensor(
-            entity_type=entity_type, declared_name=sensor.display_name,
-            source=sensor.source, upper=upper, lower=lower,
+        manifest.points.append(GeneratedPoint(
+            entity_type=entity_type, declared_name=point.display_name,
+            source=point.source, upper=upper, lower=lower,
             unmapped_levels=unmapped,
             agrees_with=tuple(group.peers) if group is not None else (),
             counter=counter.direction if counter is not None else None,
@@ -640,7 +677,7 @@ def _generate(declaration: DeclarationSource, *, domain_id: str,
     relationship_types: list[str] = []
     relationship_rules: list[dict] = []
     if supplemental is not None and supplemental.couplings:
-        by_name = {s.declared_name: s.entity_type for s in manifest.sensors}
+        by_name = {s.declared_name: s.entity_type for s in manifest.points}
         for coupling in supplemental.couplings:
             missing = [n for n in coupling.members if n not in by_name]
             if missing:
@@ -685,6 +722,46 @@ def _generate(declaration: DeclarationSource, *, domain_id: str,
                 if spec.get("name") == READING and "dynamics" not in spec:
                     spec["dynamics"] = {"model": DRIVER_DYNAMICS}
 
+    # FAULT CHANNELS AND ACTIONS, from format 4. Each names points the way a
+    # coupling does, and an endpoint that was not modelled is reported rather
+    # than dropped, for the reason `uncoupled` gives.
+    templates: list[dict] = []
+    if supplemental is not None and (supplemental.fault_channels
+                                     or supplemental.actions):
+        by_name = {s.declared_name: s.entity_type for s in manifest.points}
+        for channel in supplemental.fault_channels:
+            missing = [n for n in channel.members if n not in by_name]
+            if missing:
+                manifest.unchanneled.append(
+                    {"from": channel.source, "to": channel.target,
+                     "reason": "endpoint_not_modelled", "missing": missing})
+                continue
+            if FAULT_RELATION not in relationship_types:
+                relationship_types.append(FAULT_RELATION)
+            rule = {"type": FAULT_RELATION,
+                    "source_type": by_name[channel.source],
+                    "target_type": by_name[channel.target],
+                    "edge_direction": "causal"}
+            # A WEIGHT ONLY WHERE THE FILE GAVE ONE. Without it the engine
+            # declines to rank along the edge rather than choose a number, and
+            # that refusal is the answer the file has earned.
+            if channel.weight is not None:
+                rule["causal"] = {"weight": channel.weight}
+            relationship_rules.append(rule)
+            manifest.channeled.append((channel.source, channel.target))
+        for action in supplemental.actions:
+            if action.point not in by_name:
+                manifest.unacted.append({"name": action.name, "point": action.point,
+                                         "reason": "point_not_modelled"})
+                continue
+            templates.append({
+                "name": action.name, "applies_to": by_name[action.point],
+                "parameters_schema": {"value": {"type": "number",
+                                                "entity_property": READING}},
+                "effect": action.effect, "settle_s": action.settle_s,
+                "source": action.basis})
+            manifest.actions.append(action.name)
+
     model = {"domain": {"id": domain_id,
                         # The generated model's own name, which travels with it
                         # into the engine and into every report built from it.
@@ -695,4 +772,29 @@ def _generate(declaration: DeclarationSource, *, domain_id: str,
     if relationship_rules:
         model["domain"]["relationship_types"] = relationship_types
         model["domain"]["relationship_rules"] = relationship_rules
+    if templates:
+        model["domain"]["action_templates"] = templates
     return model, manifest
+
+
+# The published keyword, accepted until 0.2.0. Wrapped rather than rewritten, so
+# every other field keeps the constructor the dataclass generates for it.
+_GENERATED_MANIFEST_INIT = Manifest.__init__
+
+
+def _manifest_init(self, *args, sensors=_renames.UNSET, **kwargs):
+    if sensors is not _renames.UNSET:
+        kwargs["points"] = _renames.resolve(kwargs.pop("points", _renames.UNSET),
+                                            sensors, "Manifest", "sensors", "points")
+    _GENERATED_MANIFEST_INIT(self, *args, **kwargs)
+
+
+Manifest.__init__ = _manifest_init
+
+
+def __getattr__(name: str):
+    """The published name of `GeneratedPoint`, importable until 0.2.0."""
+    if name == "GeneratedSensor":
+        _renames.warn("presence_audit.generator", "GeneratedSensor", "GeneratedPoint")
+        return GeneratedPoint
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

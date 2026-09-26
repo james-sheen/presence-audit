@@ -52,7 +52,7 @@ from presence_audit import feeder
 from presence_audit.feeder import feed
 from presence_audit.generator import (COUPLING_RELATION,
                                       DEFAULT_SAMPLE_INTERVAL_S,
-                                      GeneratedSensor, Manifest, READING,
+                                      GeneratedPoint, Manifest, READING,
                                       WINDOW_SAMPLES, window_for)
 
 DRIVER = "DRIVER_POINT"
@@ -114,11 +114,11 @@ class _RecordingSession:
 def _manifest(*, cadence=CADENCE, coupled=True):
     return Manifest(
         domain_id="probe",
-        sensors=[
-            GeneratedSensor(entity_type=DRIVER_TYPE, declared_name=DRIVER,
+        points=[
+            GeneratedPoint(entity_type=DRIVER_TYPE, declared_name=DRIVER,
                             source="probe.json", upper=(None, 20000.0),
                             lower=(None, 500.0)),
-            GeneratedSensor(entity_type=DRIVEN_TYPE, declared_name=DRIVEN,
+            GeneratedPoint(entity_type=DRIVEN_TYPE, declared_name=DRIVEN,
                             source="probe.json", upper=(None, 85.0),
                             lower=(None, 5.0)),
         ],

@@ -24,8 +24,9 @@ import json
 import textwrap
 from typing import Any, Sequence
 
+from . import _renames
 from .diff import DiffReport
-from .regression import RegressionReport
+from .regression import PUBLISHED_KINDS, RegressionReport, neutral_kind
 from . import vocabulary as _vocabulary
 from .protocols import Capture
 
@@ -99,17 +100,49 @@ def headlines(singular: str | None = None) -> dict:
 
 
 def as_json(report: DiffReport, *, target: str | None = None,
-            walk: Capture | None = None, vocabulary=None) -> str:
+            walk: Capture | None = None, vocabulary=None,
+            spelled: bool = False) -> str:
     """The JSON report.
     `vocabulary` supplies the domain for this call only; omit it and the registered
     one is used. See `vocabulary.using`.
+
+    `spelled=True` asks for format 2 (`REPORT_FORMAT`): each record keyed on
+    `point` and on the vertical's own word, and each change kind spelled in that
+    word. The default is format 1, byte for byte as before, until 0.2.0 makes
+    format 2 the only one -- see `_renames`.
     """
     with _vocabulary.using(vocabulary):
-        return _as_json(report, target=target, walk=walk)
+        return _as_json(report, target=target, walk=walk, spelled=spelled)
+
+
+#: The id a format-2 report carries, so a reader can tell which it holds.
+REPORT_FORMAT = "presence-audit/report/2"
+
+
+def _subject_keys(value: Any, spelled: bool) -> dict:
+    """The keys a record names its point under.
+
+    Format 1 is unchanged: the published key and, beside it, the domain's own.
+    Format 2 leads with `point`, adds the domain's own word, and writes the
+    published key too through the window -- a reader switching on it keeps
+    working until it has moved.
+    """
+    if not spelled:
+        return {_renames.PUBLISHED_SUBJECT: value, **_own_key(value)}
+    keys: dict = {"point": value}
+    own = _vocabulary.own_key()
+    if own and own != "point":
+        keys[own] = value
+    keys.setdefault(_renames.PUBLISHED_SUBJECT, value)
+    return keys
+
+
+def _kind(kind: str, spelled: bool) -> str:
+    return _vocabulary.spelled_kind(kind) if spelled else kind
 
 
 def _as_json(report: DiffReport, *, target: str | None = None,
-             walk: Capture | None = None) -> str:
+             walk: Capture | None = None, spelled: bool = False) -> str:
     payload: dict[str, Any] = {
         "target": target,
         "walk_complete": report.walk_complete,
@@ -117,20 +150,22 @@ def _as_json(report: DiffReport, *, target: str | None = None,
         "counts": report.counts(),
         "exit_code": report.exit_code,
         "findings": [
-            {"kind": f.kind, "sensor": f.sensor, **_own_key(f.sensor),
+            {"kind": _kind(f.kind, spelled), **_subject_keys(f.point, spelled),
              "detail": f.detail,
              "regression": f.is_regression,
              "declared_in": f.declared_in, "live_path": f.live_path}
             for f in _ordered(report)
         ],
     }
+    if spelled:
+        payload = {"format": REPORT_FORMAT, **payload}
     if report.declaration_sources:
         # Emitted only when one was used, so a run against the manufacturer's files
         # alone carries no key claiming it had help. Both the prose line and the
         # fields it was built from: a machine consumer should not have to parse a
         # sentence, and a person reading raw JSON should not have to reassemble one.
         payload["declaration_sources"] = [
-            _source_as_json(source) for source in report.declaration_sources]
+            _source_as_json(source, spelled) for source in report.declaration_sources]
     if walk is not None:
         # Sections the VERTICAL adds, under the names it gives them. Naming
         # `strict_fields` here is what made this builder know about Redfish.
@@ -158,7 +193,7 @@ def _own_counts(before: int, after: int) -> dict:
     return {f"{key}_before": before, f"{key}_after": after} if key else {}
 
 
-def _source_as_json(source: Any) -> dict:
+def _source_as_json(source: Any, spelled: bool = False) -> dict:
     """One provenance entry, from whatever the protocol actually promises.
 
     `DeclarationSource.sources` promises `Sequence[object]` -- the files or
@@ -189,7 +224,10 @@ def _source_as_json(source: Any) -> dict:
             "reviewed_by": getattr(source, "reviewed_by", None),
             "reviewed_on": getattr(source, "reviewed_on", None),
             "downgrade": getattr(source, "is_downgrade", None),
-            "sensors_supplied": list(supplied) if supplied is not None else None,
+            **({"points_supplied": list(supplied) if supplied is not None else None}
+               if spelled else {}),
+            _renames.PUBLISHED_SUBJECTS + "_supplied":
+                list(supplied) if supplied is not None else None,
             "provenance": described() if callable(described) else str(source)}
 
 
@@ -218,7 +256,7 @@ def declaration_sources_as_text(sources: Sequence[Any]) -> list[str]:
 def _ordered(report: DiffReport) -> list:
     rank = {kind: i for i, kind in enumerate(KIND_ORDER)}
     return sorted(report.findings,
-                  key=lambda f: (rank.get(f.kind, len(KIND_ORDER)), f.sensor))
+                  key=lambda f: (rank.get(f.kind, len(KIND_ORDER)), f.point))
 
 
 #: The counts this module owns: the label it prints, the key, the field width.
@@ -287,7 +325,7 @@ def _as_text(report: DiffReport, *, target: str | None = None) -> str:
             continue
         label, note = labels.get(key, (key, ""))
         lines.append(f"  {label:<18}{value:>5}" + (f"   ({note})" if note else ""))
-        for entry in report.not_sensor_kinds.get(kind_of.get(key, ""), [])[:10]:
+        for entry in report.not_point_kinds.get(kind_of.get(key, ""), [])[:10]:
             lines.append(f"      {entry.display_name}  [{entry.type}]")
     lines.append("")
 
@@ -312,7 +350,7 @@ def _as_text(report: DiffReport, *, target: str | None = None) -> str:
         lines.append(f"{title} -- {len(findings)}{flag}")
         lines.append("-" * len(f"{title} -- {len(findings)}{flag}"))
         for finding in findings:
-            lines.append(f"  {finding.sensor}")
+            lines.append(f"  {finding.point}")
             lines.append(f"      {finding.detail}")
             if finding.declared_in:
                 lines.append(f"      declared in {finding.declared_in}")
@@ -331,10 +369,10 @@ CHANGE_ORDER = (
     # First, because it EXPLAINS the removals below it. A reader who meets forty
     # removals and then the note has already started writing the incident.
     "aggregation_prefix_shift",
-    "sensor_removed",
-    "sensor_renamed",
+    "point_removed", "sensor_removed",
+    "point_renamed", "sensor_renamed",
     "reading_lost",
-    "sensor_disabled",
+    "point_disabled", "sensor_disabled",
     "threshold_removed",
     "threshold_moved",
     "units_changed",
@@ -342,8 +380,8 @@ CHANGE_ORDER = (
     "field_drift",
     "walk_incomplete",
     "threshold_added",
-    "sensor_enabled",
-    "sensor_added",
+    "point_enabled", "sensor_enabled",
+    "point_added", "sensor_added",
     "aggregation_prefix_paired",
 )
 
@@ -364,11 +402,11 @@ def change_headlines(singular: str | None = None) -> dict:
     """
     if singular is None:
         singular = _vocabulary.noun()[0]
-    return {
-    "sensor_removed": f"A {singular} reported before and not now",
-    "sensor_renamed": f"Same address, a different {singular} name",
+    titles = {
+    "point_removed": f"A {singular} reported before and not now",
+    "point_renamed": f"Same address, a different {singular} name",
     "reading_lost": "Still enabled, no longer reading",
-    "sensor_disabled": f"A {singular} switched off since the earlier capture",
+    "point_disabled": f"A {singular} switched off since the earlier capture",
     # Was `the earlier firmware`. What carried the threshold is the earlier
     # CAPTURE -- true of a BMC, a PLC and anything else that gets captured twice.
     "threshold_removed": "Threshold the earlier capture carried is gone",
@@ -378,50 +416,82 @@ def change_headlines(singular: str | None = None) -> dict:
     "field_drift": "New properties the published schema does not declare",
     "walk_incomplete": "A walk did not finish",
     "threshold_added": "A threshold appeared",
-    "sensor_enabled": f"A {singular} switched on since the earlier walk",
-    "sensor_added": f"A {singular} reported now and absent from the earlier capture",
+    "point_enabled": f"A {singular} switched on since the earlier walk",
+    "point_added": f"A {singular} reported now and absent from the earlier capture",
     "aggregation_prefix_shift": "A subtree may have moved behind a new prefix",
     "aggregation_prefix_paired": "Paired across a declared aggregation prefix",
 }
+    # THE PUBLISHED SPELLINGS TITLE THE SAME, through the window: a change still
+    # carries them, and a vertical may emit either.
+    titles.update({published: titles[neutral]
+                   for neutral, published in PUBLISHED_KINDS.items()})
+    return titles
 
 
 def _ordered_changes(report: RegressionReport) -> list:
-    rank = {kind: i for i, kind in enumerate(CHANGE_ORDER)}
+    rank: dict[str, int] = {}
+    for i, kind in enumerate(CHANGE_ORDER):
+        rank.setdefault(neutral_kind(kind), i)
     return sorted(report.changes,
-                  key=lambda c: (rank.get(c.kind, len(CHANGE_ORDER)), c.sensor))
+                  key=lambda c: (rank.get(neutral_kind(c.kind), len(CHANGE_ORDER)),
+                                 c.point))
 
 
 def regression_as_json(report: RegressionReport, *, before: str, after: str,
-                       vocabulary=None) -> str:
+                       vocabulary=None, spelled: bool = False) -> str:
     """The JSON regression report.
     `vocabulary` supplies the domain for this call only; omit it and the registered
-    one is used. See `vocabulary.using`.
+    one is used. See `vocabulary.using`. `spelled` asks for format 2, as `as_json`
+    describes.
     """
     with _vocabulary.using(vocabulary):
-        return _regression_as_json(report, before=before, after=after)
+        return _regression_as_json(report, before=before, after=after,
+                                   spelled=spelled)
 
 
-def _regression_as_json(report: RegressionReport, *, before: str, after: str) -> str:
+def _count_keys(before: int, after: int, spelled: bool) -> dict:
+    if not spelled:
+        return {_renames.PUBLISHED_SUBJECTS + "_before": before,
+                _renames.PUBLISHED_SUBJECTS + "_after": after,
+                **_own_counts(before, after)}
+    keys = {"points_before": before, "points_after": after}
+    own = _vocabulary.own_key(plural=True)
+    if own and own != "points":
+        keys.update({f"{own}_before": before, f"{own}_after": after})
+    keys.setdefault(_renames.PUBLISHED_SUBJECTS + "_before", before)
+    keys.setdefault(_renames.PUBLISHED_SUBJECTS + "_after", after)
+    return keys
+
+
+def _regression_as_json(report: RegressionReport, *, before: str, after: str,
+                        spelled: bool = False) -> str:
+    counts = report.counts()
+    if spelled:
+        spelled_counts: dict[str, int] = {}
+        for kind, n in counts.items():
+            key = _vocabulary.spelled_kind(kind)
+            spelled_counts[key] = spelled_counts.get(key, 0) + n
+        counts = spelled_counts
     payload: dict[str, Any] = {
         "before": before, "after": after,
         "walks_complete": report.complete,
         "absence_changes_withheld": report.absence_withheld,
         "fields_comparable": report.fields_comparable,
-        "sensors_before": report.before_count,
-        "sensors_after": report.after_count,
-        **_own_counts(report.before_count, report.after_count),
+        **_count_keys(report.before_count, report.after_count, spelled),
         "paired": report.paired,
         "paired_through_declared_prefix": report.prefix_paired,
-        "counts": report.counts(),
+        "counts": counts,
         "regressions": len(report.regressions),
         "changes": [
-            {"kind": c.kind, "sensor": c.sensor, **_own_key(c.sensor),
+            {"kind": _kind(c.kind, spelled), **_subject_keys(c.point, spelled),
              "detail": c.detail,
              "regression": c.is_regression,
              "before_path": c.before_path, "after_path": c.after_path}
             for c in _ordered_changes(report)
         ],
     }
+    if spelled:
+        payload = {"format": REPORT_FORMAT, **payload}
     return json.dumps(payload, indent=2, sort_keys=False)
 
 
@@ -487,17 +557,19 @@ def _regression_as_text(report: RegressionReport, *, before: str, after: str) ->
         lines.append(f"{title} -- {len(changes)}{flag}")
         lines.append("-" * len(f"{title} -- {len(changes)}{flag}"))
         for change in changes:
-            lines.append(f"  {change.sensor}")
+            lines.append(f"  {change.point}")
             lines.append(f"      {change.detail}")
         lines.append("")
 
-    if report.absence_withheld and any(c.kind == "sensor_renamed" for c in report.changes):
+    if report.absence_withheld and any(neutral_kind(c.kind) == "point_renamed"
+                                       for c in report.changes):
         lines.append("  A rename is reported only where the address stayed the same.")
         lines.append(f"  A {singular} whose name AND address both changed appears above as")
         lines.append("  one removal and one addition -- but absence is withheld on this")
         lines.append("  run, so neither is shown.")
         lines.append("")
-    elif any(c.kind in ("sensor_removed", "sensor_added") for c in report.changes):
+    elif any(neutral_kind(c.kind) in ("point_removed", "point_added")
+             for c in report.changes):
         lines.append("  A rename is reported only where the address stayed the same.")
         lines.append(f"  A {singular} whose name AND address both changed appears above as")
         lines.append("  one removal and one addition; nothing in two captures says which")
