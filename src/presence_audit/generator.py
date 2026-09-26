@@ -62,7 +62,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import _renames
 from . import vocabulary as _vocabulary
 from .diff import _subject
 from .protocols import DeclarationSource, DeclaredPoint
@@ -261,12 +260,6 @@ class Manifest:
     #: nobody declared anything would be this file choosing a number.
     sampling_interval_s: float | None = None
 
-    @property
-    def sensors(self) -> list[GeneratedPoint]:
-        """The published name of `points`, readable until 0.2.0."""
-        _renames.warn("Manifest", "sensors", "points")
-        return self.points
-
     def exclude(self, reason: str, point: DeclaredPoint) -> None:
         self.excluded.setdefault(reason, []).append(point.display_name)
 
@@ -330,9 +323,6 @@ class Manifest:
                if self.channeled or self.unchanneled else {}),
             **({"actions": list(self.actions), "unacted": list(self.unacted)}
                if self.actions or self.unacted else {}),
-            # The published key and, from 0.1.13, the neutral one beside it.
-            # A reader moves to `points` inside the window; 0.2.0 writes only it.
-            _renames.PUBLISHED_SUBJECTS: generated,
             "points": generated,
             "excluded": {reason: list(names)
                          for reason, names in self.excluded.items()},
@@ -775,26 +765,3 @@ def _generate(declaration: DeclarationSource, *, domain_id: str,
     if templates:
         model["domain"]["action_templates"] = templates
     return model, manifest
-
-
-# The published keyword, accepted until 0.2.0. Wrapped rather than rewritten, so
-# every other field keeps the constructor the dataclass generates for it.
-_GENERATED_MANIFEST_INIT = Manifest.__init__
-
-
-def _manifest_init(self, *args, sensors=_renames.UNSET, **kwargs):
-    if sensors is not _renames.UNSET:
-        kwargs["points"] = _renames.resolve(kwargs.pop("points", _renames.UNSET),
-                                            sensors, "Manifest", "sensors", "points")
-    _GENERATED_MANIFEST_INIT(self, *args, **kwargs)
-
-
-Manifest.__init__ = _manifest_init
-
-
-def __getattr__(name: str):
-    """The published name of `GeneratedPoint`, importable until 0.2.0."""
-    if name == "GeneratedSensor":
-        _renames.warn("presence_audit.generator", "GeneratedSensor", "GeneratedPoint")
-        return GeneratedPoint
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

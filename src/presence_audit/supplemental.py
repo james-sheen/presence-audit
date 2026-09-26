@@ -139,9 +139,7 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import _renames
 from . import vocabulary as _vocabulary
-from ._renames import UNSET
 
 __all__ = ["ACCEPTED_FORMATS", "KEYS_BY_FORMAT", "COUPLING_KEYS_BY_FORMAT",
            "Supplemental", "RedundantGroup", "Counter", "Coupling",
@@ -227,12 +225,13 @@ KEYS_BY_FORMAT = {
 
 #: The keys a redundant group lists its members under and a counter names its
 #: point under, per format. /4 has the neutral words; every earlier id keeps the
-#: words it was published with, so a file written for it reads as it always did.
-#: A vertical's own word for the thing it audits is accepted beside either.
+#: words it was published with, so a file written for it reads as it always did
+#: -- those two keys are that format's, and no current format reads them. A
+#: vertical's own word for the thing it audits is accepted beside either.
 MEMBER_KEYS_BY_FORMAT = {
-    "presence-audit/supplemental/4": ("points", "point"),
+    FORMAT: ("points", "point"),
+    **{earlier: ("sensors", "sensor") for earlier in ACCEPTED_FORMATS[1:]},
 }
-_PUBLISHED_MEMBER_KEYS = (_renames.PUBLISHED_SUBJECTS, _renames.PUBLISHED_SUBJECT)
 
 #: Every key a fault channel and an action may carry.
 FAULT_CHANNEL_KEYS = frozenset({"from", "to", "basis", "weight", "weight_basis"})
@@ -310,29 +309,12 @@ class SupplementalError(ValueError):
     """The file could not be used. Never a warning: see the module docstring."""
 
 
-@dataclass(frozen=True, init=False)
+@dataclass(frozen=True)
 class RedundantGroup:
     points: tuple[str, ...]
     basis: str
     tolerance: float | None = None
     tolerance_absolute: float | None = None
-
-    def __init__(self, points: tuple[str, ...] = UNSET, basis: str = UNSET,
-                 tolerance: float | None = None,
-                 tolerance_absolute: float | None = None,
-                 *, sensors: tuple[str, ...] = UNSET) -> None:
-        points = _renames.resolve(points, sensors, "RedundantGroup", "sensors", "points")
-        if points is UNSET or basis is UNSET:
-            raise TypeError("RedundantGroup() needs points and basis")
-        object.__setattr__(self, "points", tuple(points))
-        object.__setattr__(self, "basis", basis)
-        object.__setattr__(self, "tolerance", tolerance)
-        object.__setattr__(self, "tolerance_absolute", tolerance_absolute)
-
-    @property
-    def sensors(self) -> tuple[str, ...]:
-        _renames.warn("RedundantGroup", "sensors", "points")
-        return self.points
 
     @property
     def primary(self) -> str:
@@ -350,28 +332,12 @@ class RedundantGroup:
         return self.points[1:]
 
 
-@dataclass(frozen=True, init=False)
+@dataclass(frozen=True)
 class Counter:
     point: str
     basis: str
     direction: str = "increasing"
     allow_reset: bool = True
-
-    def __init__(self, point: str = UNSET, basis: str = UNSET,
-                 direction: str = "increasing", allow_reset: bool = True,
-                 *, sensor: str = UNSET) -> None:
-        point = _renames.resolve(point, sensor, "Counter", "sensor", "point")
-        if point is UNSET or basis is UNSET:
-            raise TypeError("Counter() needs point and basis")
-        object.__setattr__(self, "point", point)
-        object.__setattr__(self, "basis", basis)
-        object.__setattr__(self, "direction", direction)
-        object.__setattr__(self, "allow_reset", allow_reset)
-
-    @property
-    def sensor(self) -> str:
-        _renames.warn("Counter", "sensor", "point")
-        return self.point
 
 
 @dataclass(frozen=True)
@@ -535,33 +501,26 @@ class Supplemental:
 
 def _own(plural: bool = False) -> str | None:
     """The domain's own spelling of an input key, or None when it is ours."""
-    return _vocabulary.record_key(plural=plural)
+    return _vocabulary.own_key(plural=plural)
 
 
 def _member(block: dict, plural: bool, declared_format: str):
     """A block's members under its format's key, or the domain's own word.
 
-    /4 names them `points` and `point`, and takes the domain's own word as a
-    format-2 key does; every earlier id reads the words it was published with,
-    exactly as it always has.
+    /4 names them `points` and `point`; every earlier id reads the words it was
+    published with, exactly as it always has. Either takes the domain's own
+    word beside its key, as a report keys a record on it.
     """
-    keys = MEMBER_KEYS_BY_FORMAT.get(declared_format)
-    if keys is None:
-        return _either(block, _PUBLISHED_MEMBER_KEYS[0 if plural else 1])
-    own = _vocabulary.own_key(plural=plural)
-    if own is not None and own in block:
-        return block[own]
-    return block.get(keys[0 if plural else 1])
+    return _either(block, MEMBER_KEYS_BY_FORMAT[declared_format][0 if plural else 1])
 
 
 def _either(block: dict, key: str):
-    """A block's value under the published key OR the domain's own word for it.
+    """A block's value under its format's key OR the domain's own word for it.
 
-    The published spellings are REQUIRED INPUT keys here, so a vertical whose
-    domain is a different one had to write another domain's noun into its own
-    supplemental file to be read at all -- the one surface it could not route
-    around by writing its own report. Both spellings are accepted now; neither
-    is required to be the one the published format was named after.
+    These are REQUIRED INPUT keys, so a vertical whose domain is a different
+    one once had to write another domain's noun into its own supplemental file
+    to be read at all -- the one surface it could not route around by writing
+    its own report. The domain's own word is accepted beside the format's key.
     """
     own = _own(plural=key.endswith("s"))
     if own is not None and own in block:
@@ -856,7 +815,7 @@ def load_supplemental(path: str | Path) -> Supplemental:
                 f"{list(_DIRECTIONS)}")
         named = _member(block, False, declared_format)
         if named is None or (isinstance(named, str) and not named.strip()):
-            keys = MEMBER_KEYS_BY_FORMAT.get(declared_format, _PUBLISHED_MEMBER_KEYS)
+            keys = MEMBER_KEYS_BY_FORMAT[declared_format]
             raise SupplementalError(
                 f"{where} has no {keys[1]!r}. This file states things the machine "
                 f"does not state about itself, so every entry has to say what "

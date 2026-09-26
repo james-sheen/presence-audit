@@ -29,7 +29,11 @@ OLD_SUPPLEMENTAL = "bmc-sensor-audit/supplemental/1"
 
 class TestTheEmittedNameIsTheNewOne:
     def test_attestation(self):
-        assert attestation.ATTESTATION_FORMAT == "presence-audit/attestation/1"
+        """The owner, and the newest accepted id -- as `test_supplemental` below
+        pins it, for the reason given there: 0.2.0 moved the written id to /2."""
+        assert attestation.ATTESTATION_FORMAT.startswith("presence-audit/attestation/")
+        assert attestation.ATTESTATION_FORMAT == attestation.ACCEPTED_ATTESTATION_FORMATS[0]
+        assert attestation.ATTESTATION_FORMAT_1 in attestation.ACCEPTED_ATTESTATION_FORMATS
 
     def test_supplemental(self):
         """The claim of this class is the OWNER, not the version.

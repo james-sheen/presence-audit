@@ -45,82 +45,36 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Sequence
 
-from . import _renames
 from . import vocabulary as _vocabulary
-from ._renames import UNSET
 from .protocols import Capture, CapturedPoint
 
 __all__ = ["Change", "RegressionReport", "compare_walks", "parse_prefix_map",
-           "REGRESSION_KINDS", "PUBLISHED_KINDS", "NEUTRAL_KINDS", "neutral_kind"]
+           "REGRESSION_KINDS"]
 
 # What counts as *worse*, and therefore fails a firmware gate. The split is not
 # about how surprising a change is: it is about whether something that worked
 # before stops working now. A point appearing is news; a point vanishing, going
 # quiet, changing the name it is keyed under, changing its units, or losing a
 # threshold is a downstream consumer breaking.
-#: THE KINDS NAMING A POINT, in the core's own word and in the one they were
-#: published under. Through the 0.1 line a change still CARRIES the published
-#: spelling -- two distributions read these strings out of a report, and a kind
-#: renamed under them is a reader broken -- and both spellings are accepted
-#: everywhere a kind is read, so a vertical may emit either. A report asked for
-#: format 2 spells them in the vertical's own noun (`vocabulary.spelled_kind`);
-#: from 0.2.0 a change carries the neutral name. See `_renames`.
-PUBLISHED_KINDS = {
-    "point_removed": "sensor_removed",
-    "point_renamed": "sensor_renamed",
-    "point_disabled": "sensor_disabled",
-    "point_enabled": "sensor_enabled",
-    "point_added": "sensor_added",
-}
-NEUTRAL_KINDS = {published: neutral for neutral, published in PUBLISHED_KINDS.items()}
-
-
-def neutral_kind(kind: str) -> str:
-    """A change kind in the core's own word; any other kind unchanged."""
-    return NEUTRAL_KINDS.get(kind, kind)
-
-
-#: In the spelling a change CARRIES through the window, which is the spelling
-#: the sites below emit -- written as literals, so the kinds this module emits
-#: can be read off it, and a consumer's suite does exactly that. A kind in the
-#: core's own word is looked up through `PUBLISHED_KINDS` (`is_regression`).
+#: In the core's own word, and written as literals at the sites below, so the
+#: kinds this module emits can be read off it -- a consumer's suite does
+#: exactly that. A report spells a kind naming a point in the vertical's own
+#: noun (`vocabulary.spelled_kind`); a change always carries the neutral one.
 REGRESSION_KINDS = frozenset({
-    "sensor_removed", "sensor_renamed", "reading_lost", "sensor_disabled",
+    "point_removed", "point_renamed", "reading_lost", "point_disabled",
     "threshold_removed", "threshold_moved", "units_changed",
 })
 
 
-@dataclass(frozen=True, init=False)
+@dataclass(frozen=True)
 class Change:
-    """One difference between two captures, about one point.
-
-    `point` names it; the published name reads until 0.2.0 (see `_renames`).
-    """
+    """One difference between two captures, about one point."""
 
     kind: str
     point: str
     detail: str
     before_path: str | None = None
     after_path: str | None = None
-
-    def __init__(self, kind: str, point: str = UNSET, detail: str = UNSET,
-                 before_path: str | None = None, after_path: str | None = None,
-                 *, sensor: str = UNSET) -> None:
-        point = _renames.resolve(point, sensor, "Change", "sensor", "point")
-        missing = [name for name, value in (("point", point), ("detail", detail))
-                   if value is UNSET]
-        if missing:
-            raise TypeError(f"Change() missing required argument(s): {', '.join(missing)}")
-        object.__setattr__(self, "kind", kind)
-        object.__setattr__(self, "point", point)
-        object.__setattr__(self, "detail", detail)
-        object.__setattr__(self, "before_path", before_path)
-        object.__setattr__(self, "after_path", after_path)
-
-    @property
-    def sensor(self) -> str:
-        _renames.warn("Change", "sensor", "point")
-        return self.point
 
     @property
     def is_regression(self) -> bool:
@@ -130,9 +84,8 @@ class Change:
         # printed two lines above it. The core's members stay: a vocabulary says
         # which of ITS kinds count, and does not get to say that a declared point
         # being absent does not.
-        own = _vocabulary.regression_kinds()
-        return (PUBLISHED_KINDS.get(self.kind, self.kind) in REGRESSION_KINDS
-                or self.kind in own or neutral_kind(self.kind) in own)
+        return (self.kind in REGRESSION_KINDS
+                or self.kind in _vocabulary.regression_kinds())
 
     def __str__(self) -> str:
         return f"[{self.kind}] {self.point} -- {self.detail}"
@@ -504,7 +457,7 @@ def _compare_walks(before: Capture, after: Capture, *,
     for old, new in pairs:
         if old.name != new.name and id(new) not in renamed_by_prefix:
             changes.append(Change(
-                "sensor_renamed", new.name,
+                "point_renamed", new.name,
                 f"reported as {old.name!r} in the earlier capture and "
                 f"{new.name!r} in this one, at the same address. Every dashboard, "
                 f"alert rule and trend query keyed on the old string stops "
@@ -526,12 +479,12 @@ def _compare_walks(before: Capture, after: Capture, *,
             changes.append(shift)
         for old in gone:
             changes.append(Change(
-                "sensor_removed", old.name,
+                "point_removed", old.name,
                 f"reported at {old.path} in the earlier capture and not reported "
                 f"at all in this one, under any name or address", old.path, None))
         for new in arrived:
             changes.append(Change(
-                "sensor_added", new.name,
+                "point_added", new.name,
                 f"reported at {new.path} in this walk and absent from the earlier "
                 f"one", None, new.path))
     else:

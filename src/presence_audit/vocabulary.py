@@ -24,8 +24,6 @@ import contextvars
 import os
 from typing import Mapping, Optional, Protocol, Sequence
 
-from . import _renames
-
 from .protocols import PROTOCOL_VERSION
 
 
@@ -437,26 +435,6 @@ def regression_kinds() -> frozenset:
         return frozenset()
 
 
-def record_key(plural: bool = False) -> Optional[str]:
-    """The domain's own word for a record key, or None when it is the default.
-
-    None means *nothing to add*: the artifact keys were named after one domain
-    before this package was domain-free, and that vertical's own noun is the
-    word they were named after -- so for it this answers None and not one byte
-    of its output moves.
-
-    A key rather than a rename. "cert-generator" reads the published one out of
-    a finding and "bmc-sensor-audit" reads several more, so renaming would break
-    readers that are right to read what was published. Emitting the domain's key
-    BESIDE the published one lets a line audit key on its own word while
-    everything that already works keeps working -- the only shape that can land
-    without a compatibility break.
-    """
-    word = noun()[1 if plural else 0]
-    published = (_renames.PUBLISHED_SUBJECT, _renames.PUBLISHED_SUBJECTS)[1 if plural else 0]
-    return None if word == published else word
-
-
 def own_key(plural: bool = False) -> Optional[str]:
     """The domain's own word as a record key in format 2, or None for the core's.
 
@@ -476,15 +454,12 @@ def spelled_kind(kind: str) -> str:
     `point_removed` for a domain with no noun of its own, and the domain's word
     in its place otherwise -- which gives the first vertical back exactly the
     kinds it has always emitted. Any kind that names no point is returned as it
-    is. Read by the format-2 writers; see `_renames` for the window.
+    is. Read by the format-2 writers.
     """
-    from .regression import neutral_kind
-
-    neutral = neutral_kind(kind)
-    if not neutral.startswith("point_"):
+    if not kind.startswith("point_"):
         return kind
     word = own_key() or "point"
-    return word + neutral[len("point"):]
+    return word + kind[len("point"):]
 
 
 def registered() -> bool:

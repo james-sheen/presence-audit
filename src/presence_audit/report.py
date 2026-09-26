@@ -24,9 +24,8 @@ import json
 import textwrap
 from typing import Any, Sequence
 
-from . import _renames
 from .diff import DiffReport
-from .regression import PUBLISHED_KINDS, RegressionReport, neutral_kind
+from .regression import RegressionReport
 from . import vocabulary as _vocabulary
 from .protocols import Capture
 
@@ -101,15 +100,14 @@ def headlines(singular: str | None = None) -> dict:
 
 def as_json(report: DiffReport, *, target: str | None = None,
             walk: Capture | None = None, vocabulary=None,
-            spelled: bool = False) -> str:
-    """The JSON report.
+            spelled: bool = True) -> str:
+    """The JSON report, in format 2 (`REPORT_FORMAT`).
     `vocabulary` supplies the domain for this call only; omit it and the registered
     one is used. See `vocabulary.using`.
 
-    `spelled=True` asks for format 2 (`REPORT_FORMAT`): each record keyed on
-    `point` and on the vertical's own word, and each change kind spelled in that
-    word. The default is format 1, byte for byte as before, until 0.2.0 makes
-    format 2 the only one -- see `_renames`.
+    Each record is keyed on `point` and on the vertical's own word, and each
+    change kind is spelled in that word. `spelled=False` keys records on `point`
+    alone and leaves kinds in the core's word.
     """
     with _vocabulary.using(vocabulary):
         return _as_json(report, target=target, walk=walk, spelled=spelled)
@@ -120,20 +118,12 @@ REPORT_FORMAT = "presence-audit/report/2"
 
 
 def _subject_keys(value: Any, spelled: bool) -> dict:
-    """The keys a record names its point under.
-
-    Format 1 is unchanged: the published key and, beside it, the domain's own.
-    Format 2 leads with `point`, adds the domain's own word, and writes the
-    published key too through the window -- a reader switching on it keeps
-    working until it has moved.
-    """
-    if not spelled:
-        return {_renames.PUBLISHED_SUBJECT: value, **_own_key(value)}
+    """The keys a record names its point under: `point`, and the domain's own
+    word beside it when the record is spelled."""
     keys: dict = {"point": value}
-    own = _vocabulary.own_key()
+    own = _vocabulary.own_key() if spelled else None
     if own and own != "point":
         keys[own] = value
-    keys.setdefault(_renames.PUBLISHED_SUBJECT, value)
     return keys
 
 
@@ -142,8 +132,9 @@ def _kind(kind: str, spelled: bool) -> str:
 
 
 def _as_json(report: DiffReport, *, target: str | None = None,
-             walk: Capture | None = None, spelled: bool = False) -> str:
+             walk: Capture | None = None, spelled: bool = True) -> str:
     payload: dict[str, Any] = {
+        "format": REPORT_FORMAT,
         "target": target,
         "walk_complete": report.walk_complete,
         "absence_findings_withheld": report.absence_withheld,
@@ -157,8 +148,6 @@ def _as_json(report: DiffReport, *, target: str | None = None,
             for f in _ordered(report)
         ],
     }
-    if spelled:
-        payload = {"format": REPORT_FORMAT, **payload}
     if report.declaration_sources:
         # Emitted only when one was used, so a run against the manufacturer's files
         # alone carries no key claiming it had help. Both the prose line and the
@@ -174,26 +163,7 @@ def _as_json(report: DiffReport, *, target: str | None = None,
     return json.dumps(payload, indent=2, sort_keys=False)
 
 
-def _own_key(value: Any) -> dict:
-    """The domain's own key for a record, beside the published one, or nothing.
-
-    A line audit's certificate came out reading "sensor": ST-01.die_temp_c,
-    because every finding, decline and evidence record in this core is keyed on
-    one domain's word. That word cannot simply move -- "cert-generator" reads it
-    out of a finding and "bmc-sensor-audit" reads several more -- so the domain's
-    key is ADDED and the published one stays. For the vertical the key was named
-    after, the two are the same word and nothing is added at all.
-    """
-    key = _vocabulary.record_key()
-    return {key: value} if key else {}
-
-
-def _own_counts(before: int, after: int) -> dict:
-    key = _vocabulary.record_key(plural=True)
-    return {f"{key}_before": before, f"{key}_after": after} if key else {}
-
-
-def _source_as_json(source: Any, spelled: bool = False) -> dict:
+def _source_as_json(source: Any, spelled: bool = True) -> dict:
     """One provenance entry, from whatever the protocol actually promises.
 
     `DeclarationSource.sources` promises `Sequence[object]` -- the files or
@@ -213,6 +183,8 @@ def _source_as_json(source: Any, spelled: bool = False) -> dict:
     """
     described = getattr(source, "provenance_line", None)
     supplied = getattr(source, "supplied", None)
+    own = _vocabulary.own_key(plural=True) if spelled else None
+    listed = list(supplied) if supplied is not None else None
     return {"format": getattr(source, "kind", None),
             # A source that is just a path IS its path, which is what the text
             # report prints for one. Neither half invents a `kind` for it.
@@ -224,10 +196,8 @@ def _source_as_json(source: Any, spelled: bool = False) -> dict:
             "reviewed_by": getattr(source, "reviewed_by", None),
             "reviewed_on": getattr(source, "reviewed_on", None),
             "downgrade": getattr(source, "is_downgrade", None),
-            **({"points_supplied": list(supplied) if supplied is not None else None}
-               if spelled else {}),
-            _renames.PUBLISHED_SUBJECTS + "_supplied":
-                list(supplied) if supplied is not None else None,
+            "points_supplied": listed,
+            **({f"{own}_supplied": listed} if own and own != "points" else {}),
             "provenance": described() if callable(described) else str(source)}
 
 
@@ -365,16 +335,14 @@ def _as_text(report: DiffReport, *, target: str | None = None) -> str:
 
 # Most actionable first, same principle as KIND_ORDER. A removal leads because it
 # is the change a firmware release is most often shipped without noticing.
-#: In the spelling a change carries through the window; a kind in the core's
-#: own word ranks beside its published one (`_ordered_changes`).
 CHANGE_ORDER = (
     # First, because it EXPLAINS the removals below it. A reader who meets forty
     # removals and then the note has already started writing the incident.
     "aggregation_prefix_shift",
-    "sensor_removed",
-    "sensor_renamed",
+    "point_removed",
+    "point_renamed",
     "reading_lost",
-    "sensor_disabled",
+    "point_disabled",
     "threshold_removed",
     "threshold_moved",
     "units_changed",
@@ -382,8 +350,8 @@ CHANGE_ORDER = (
     "field_drift",
     "walk_incomplete",
     "threshold_added",
-    "sensor_enabled",
-    "sensor_added",
+    "point_enabled",
+    "point_added",
     "aggregation_prefix_paired",
 )
 
@@ -397,10 +365,8 @@ def change_headlines(singular: str | None = None) -> dict:
     and fetches was never used, and the docstring's claim was true of `headlines`
     next door and of nothing here.
 
-    The KEYS are a different question and are deliberately unchanged. Five of
-    them carry one domain's noun, and they are format: "bmc-sensor-audit" and
-    "cert-generator" read change kinds out of a published report. A kind renamed
-    is a reader broken, so what moves is the prose a person reads.
+    The KEYS are the kinds a change carries, in the core's own word; a report
+    spells the five naming a point in the domain's noun (`vocabulary.spelled_kind`).
     """
     if singular is None:
         singular = _vocabulary.noun()[0]
@@ -423,28 +389,20 @@ def change_headlines(singular: str | None = None) -> dict:
     "aggregation_prefix_shift": "A subtree may have moved behind a new prefix",
     "aggregation_prefix_paired": "Paired across a declared aggregation prefix",
 }
-    # THE PUBLISHED SPELLINGS TITLE THE SAME, through the window: a change still
-    # carries them, and a vertical may emit either.
-    titles.update({published: titles[neutral]
-                   for neutral, published in PUBLISHED_KINDS.items()})
     return titles
 
 
 def _ordered_changes(report: RegressionReport) -> list:
-    rank: dict[str, int] = {}
-    for i, kind in enumerate(CHANGE_ORDER):
-        rank.setdefault(neutral_kind(kind), i)
+    rank = {kind: i for i, kind in enumerate(CHANGE_ORDER)}
     return sorted(report.changes,
-                  key=lambda c: (rank.get(neutral_kind(c.kind), len(CHANGE_ORDER)),
-                                 c.point))
+                  key=lambda c: (rank.get(c.kind, len(CHANGE_ORDER)), c.point))
 
 
 def regression_as_json(report: RegressionReport, *, before: str, after: str,
-                       vocabulary=None, spelled: bool = False) -> str:
-    """The JSON regression report.
+                       vocabulary=None, spelled: bool = True) -> str:
+    """The JSON regression report, in format 2.
     `vocabulary` supplies the domain for this call only; omit it and the registered
-    one is used. See `vocabulary.using`. `spelled` asks for format 2, as `as_json`
-    describes.
+    one is used. See `vocabulary.using`. `spelled` is as `as_json` describes.
     """
     with _vocabulary.using(vocabulary):
         return _regression_as_json(report, before=before, after=after,
@@ -452,21 +410,15 @@ def regression_as_json(report: RegressionReport, *, before: str, after: str,
 
 
 def _count_keys(before: int, after: int, spelled: bool) -> dict:
-    if not spelled:
-        return {_renames.PUBLISHED_SUBJECTS + "_before": before,
-                _renames.PUBLISHED_SUBJECTS + "_after": after,
-                **_own_counts(before, after)}
     keys = {"points_before": before, "points_after": after}
-    own = _vocabulary.own_key(plural=True)
+    own = _vocabulary.own_key(plural=True) if spelled else None
     if own and own != "points":
         keys.update({f"{own}_before": before, f"{own}_after": after})
-    keys.setdefault(_renames.PUBLISHED_SUBJECTS + "_before", before)
-    keys.setdefault(_renames.PUBLISHED_SUBJECTS + "_after", after)
     return keys
 
 
 def _regression_as_json(report: RegressionReport, *, before: str, after: str,
-                        spelled: bool = False) -> str:
+                        spelled: bool = True) -> str:
     counts = report.counts()
     if spelled:
         spelled_counts: dict[str, int] = {}
@@ -475,6 +427,7 @@ def _regression_as_json(report: RegressionReport, *, before: str, after: str,
             spelled_counts[key] = spelled_counts.get(key, 0) + n
         counts = spelled_counts
     payload: dict[str, Any] = {
+        "format": REPORT_FORMAT,
         "before": before, "after": after,
         "walks_complete": report.complete,
         "absence_changes_withheld": report.absence_withheld,
@@ -492,8 +445,6 @@ def _regression_as_json(report: RegressionReport, *, before: str, after: str,
             for c in _ordered_changes(report)
         ],
     }
-    if spelled:
-        payload = {"format": REPORT_FORMAT, **payload}
     return json.dumps(payload, indent=2, sort_keys=False)
 
 
@@ -563,14 +514,14 @@ def _regression_as_text(report: RegressionReport, *, before: str, after: str) ->
             lines.append(f"      {change.detail}")
         lines.append("")
 
-    if report.absence_withheld and any(neutral_kind(c.kind) == "point_renamed"
+    if report.absence_withheld and any(c.kind == "point_renamed"
                                        for c in report.changes):
         lines.append("  A rename is reported only where the address stayed the same.")
         lines.append(f"  A {singular} whose name AND address both changed appears above as")
         lines.append("  one removal and one addition -- but absence is withheld on this")
         lines.append("  run, so neither is shown.")
         lines.append("")
-    elif any(neutral_kind(c.kind) in ("point_removed", "point_added")
+    elif any(c.kind in ("point_removed", "point_added")
              for c in report.changes):
         lines.append("  A rename is reported only where the address stayed the same.")
         lines.append(f"  A {singular} whose name AND address both changed appears above as")

@@ -211,7 +211,7 @@ class TestTheJsonReportAcceptsWhatTheTextReportAccepts:
 
         payload = report._source_as_json(Full())
         assert payload["format"] == "walk" and payload["provenance"] == "a sentence"
-        assert payload["sensors_supplied"] == ["A", "B"]
+        assert payload["points_supplied"] == ["A", "B"]
 
 
 class TestAMemberTheProtocolRequires:
@@ -375,19 +375,21 @@ class TestADomainThatIsNotTheOneTheKeysWereNamedAfter:
     around."""
 
     def test_a_domain_with_its_own_noun_gets_its_own_key(self):
+        """And not another domain's: 0.2.0 stopped writing the old key beside it."""
         with vocabulary.using(_Scoring()):
             row = attestation._finding({"entity_id": "T-1"}, None)
-        assert row["thing"] == "T-1" and row["sensor"] == "T-1"
+        assert row["thing"] == "T-1" and row["point"] == "T-1"
+        assert "sensor" not in row
 
-    def test_the_vertical_the_keys_were_named_after_gains_nothing(self):
+    def test_the_vertical_the_old_key_was_named_after_keeps_it_once(self):
         class Named(_Scoring):
             noun = ("sensor", "sensors")
 
         with vocabulary.using(Named()):
             row = attestation._finding({"entity_id": "T-1"}, None)
-            assert vocabulary.record_key() is None
+        assert row["sensor"] == row["point"] == "T-1"
         assert list(row).count("sensor") == 1
 
     def test_the_change_headlines_use_the_noun_they_fetch(self):
         with vocabulary.using(_Scoring()):
-            assert "thing" in report.change_headlines()["sensor_removed"]
+            assert "thing" in report.change_headlines()["point_removed"]

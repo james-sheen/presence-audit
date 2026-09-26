@@ -34,9 +34,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Sequence
 
 from .protocols import DeclarationSource, DeclaredPoint
-from . import _renames
 from . import vocabulary as _vocabulary
-from ._renames import UNSET
 from .protocols import Capture, CapturedPoint
 
 __all__ = ["Finding", "Match", "DiffReport", "compare", "normalise_name",
@@ -58,39 +56,15 @@ _SEPARATORS = re.compile(r"[\s_\-]+")
 # variables than the reader silently wildcards the difference.
 
 
-@dataclass(frozen=True, init=False)
+@dataclass(frozen=True)
 class Finding:
-    """One thing the comparison found, about one point.
-
-    `point` names it. The field was published under the first vertical's word
-    for what it audits, and that name still reads -- as a keyword and as an
-    attribute, with a `DeprecationWarning` -- until 0.2.0 (see `_renames`).
-    """
+    """One thing the comparison found, about one point."""
 
     kind: str
     point: str
     detail: str
     declared_in: str | None = None
     live_path: str | None = None
-
-    def __init__(self, kind: str, point: str = UNSET, detail: str = UNSET,
-                 declared_in: str | None = None, live_path: str | None = None,
-                 *, sensor: str = UNSET) -> None:
-        point = _renames.resolve(point, sensor, "Finding", "sensor", "point")
-        missing = [name for name, value in (("point", point), ("detail", detail))
-                   if value is UNSET]
-        if missing:
-            raise TypeError(f"Finding() missing required argument(s): {', '.join(missing)}")
-        object.__setattr__(self, "kind", kind)
-        object.__setattr__(self, "point", point)
-        object.__setattr__(self, "detail", detail)
-        object.__setattr__(self, "declared_in", declared_in)
-        object.__setattr__(self, "live_path", live_path)
-
-    @property
-    def sensor(self) -> str:
-        _renames.warn("Finding", "sensor", "point")
-        return self.point
 
     @property
     def is_regression(self) -> bool:
@@ -144,16 +118,6 @@ class DiffReport:
     # who cannot tell a manufacturer's declaration from a snapshot of one machine is
     # being handed the second while reading it as the first.
     declaration_sources: list = field(default_factory=list)
-
-    @property
-    def not_sensor_kinds(self) -> dict[str, list]:
-        _renames.warn("DiffReport", "not_sensor_kinds", "not_point_kinds")
-        return self.not_point_kinds
-
-    @not_sensor_kinds.setter
-    def not_sensor_kinds(self, value: dict[str, list]) -> None:
-        _renames.warn("DiffReport", "not_sensor_kinds", "not_point_kinds")
-        self.not_point_kinds = value
 
     @property
     def regressions(self) -> list[Finding]:
@@ -532,12 +496,9 @@ def _compare(declaration: DeclarationSource, walk: Capture, *,
 
 
 def _subject(record: object) -> str | None:
-    """The point a vertical's own record names, under either spelling.
+    """The point a vertical's own record names.
 
-    A declaration's anomalies are the vertical's own objects, read by attribute.
-    The core now reads `point`; the first vertical's records carry its own word,
-    which is read too until 0.2.0 -- without a warning, because the object is the
-    vertical's and not a name this package published.
+    A declaration's anomalies are the vertical's own objects, read by
+    attribute, and the attribute is `point`.
     """
-    value = getattr(record, "point", None)
-    return value if value is not None else getattr(record, "sensor", None)
+    return getattr(record, "point", None)

@@ -36,18 +36,22 @@ from __future__ import annotations
 from typing import Any
 
 from . import exit_contract
-from . import _renames
 from . import vocabulary as _vocabulary
 
 __all__ = ["build_attestation", "validate_attestation", "ATTESTATION_FORMAT",
-           "ATTESTATION_FORMAT_2", "ACCEPTED_ATTESTATION_FORMATS"]
+           "ATTESTATION_FORMAT_1", "ATTESTATION_FORMAT_2",
+           "ACCEPTED_ATTESTATION_FORMATS"]
 
-ATTESTATION_FORMAT = "presence-audit/attestation/1"
-
-#: What `build_attestation(..., spelled=True)` writes: each record keyed on
-#: `point` and on the vertical's own word, the published key beside them through
-#: the window. 0.2.0 writes only this. See `_renames`.
+#: What `build_attestation` writes: each record keyed on `point` and on the
+#: vertical's own word. `ATTESTATION_FORMAT` names the format this build
+#: WRITES, so a reader comparing an artifact against it keeps comparing against
+#: the right one; the explicit id is kept for code written while two were.
 ATTESTATION_FORMAT_2 = "presence-audit/attestation/2"
+ATTESTATION_FORMAT = ATTESTATION_FORMAT_2
+
+#: Written until 0.2.0 and still READ: an artifact already on disk is exactly
+#: the document it was when it was written.
+ATTESTATION_FORMAT_1 = "presence-audit/attestation/1"
 
 #: Formats this build ACCEPTS on read, newest first.
 #:
@@ -62,7 +66,7 @@ ATTESTATION_FORMAT_2 = "presence-audit/attestation/2"
 #: measurement rather than a schedule.
 ACCEPTED_ATTESTATION_FORMATS = (
     ATTESTATION_FORMAT_2,
-    ATTESTATION_FORMAT,
+    ATTESTATION_FORMAT_1,
     "bmc-sensor-audit/attestation/1",
 )
 
@@ -183,7 +187,7 @@ def _verdict_problems(block: Any) -> list[str]:
 def build_attestation(session: Any, envelope: dict, describe: dict,
                       manifest: Any, *, target: str,
                       attest_fn: Any, verdict: Any = None,
-                      spelled: bool = False) -> dict:
+                      spelled: bool = True) -> dict:
     """Assemble the artifact from an envelope `check()` has already produced.
 
     `attest_fn` is passed in rather than imported, because this module must not
@@ -203,8 +207,8 @@ def build_attestation(session: Any, envelope: dict, describe: dict,
     the next one would have invented a different one: two artifacts both carrying
     a verdict that no single reader could read.
 
-    `spelled=True` writes format 2 (`ATTESTATION_FORMAT_2`), keyed as a format-2
-    report is. The default is format 1, unchanged, until 0.2.0.
+    It writes format 2 (`ATTESTATION_FORMAT`), keyed as a format-2 report is;
+    `spelled=False` keys records on `point` alone.
     """
     problem_types = []
     for finding in envelope.get("findings") or []:
@@ -227,7 +231,7 @@ def build_attestation(session: Any, envelope: dict, describe: dict,
             evidence.append(_render(entry, manifest, spelled))
 
     artifact = {
-        "format": ATTESTATION_FORMAT_2 if spelled else ATTESTATION_FORMAT,
+        "format": ATTESTATION_FORMAT,
         "target": target,
         "engine": {
             "schema_version": (envelope.get("meta") or {}).get("schema_version"),
@@ -280,25 +284,11 @@ def verdict_block(exit_code: int, *, scored_by: str) -> dict:
 
 def _subject_keys(value: Any, spelled: bool) -> dict:
     """The keys a record names its point under -- as a format-2 report does."""
-    if not spelled:
-        return {_renames.PUBLISHED_SUBJECT: value, **_own_key(value)}
     keys: dict = {"point": value}
-    own = _vocabulary.own_key()
+    own = _vocabulary.own_key() if spelled else None
     if own and own != "point":
         keys[own] = value
-    keys.setdefault(_renames.PUBLISHED_SUBJECT, value)
     return keys
-
-
-def _own_key(value: Any) -> dict:
-    """The domain's own key beside the published one, or nothing.
-
-    See `vocabulary.record_key`. An attestation is the artifact a recipient
-    keeps, so it is the surface where one vertical's noun sitting on another
-    vertical's records lasts longest.
-    """
-    key = _vocabulary.record_key()
-    return {key: value} if key else {}
 
 
 def _boundary(evidence: list[dict]) -> str | None:
@@ -314,13 +304,7 @@ def _declared_name(entity_id: str, manifest: Any) -> str:
     An artifact naming `MB_U73_THERM_LOCAL_2` is one nobody can act on six months
     later, which is the whole failure mode a per-run record exists to avoid.
     """
-    points = getattr(manifest, "points", None)
-    if points is None:                        # a manifest older than the rename
-        # The old member by its LITERAL name: a consumer derives what this
-        # builder reads off its source, and a name held in a variable is one
-        # that derivation cannot see.
-        points = getattr(manifest, "sensors", ())
-    for point in points:
+    for point in getattr(manifest, "points", ()):
         if point.entity_type == entity_id:
             return point.declared_name
     return entity_id
@@ -347,7 +331,7 @@ def _statement(record: dict, manifest: Any) -> str | None:
     return record.get("problem_type")
 
 
-def _finding(finding: dict, manifest: Any, spelled: bool = False) -> dict:
+def _finding(finding: dict, manifest: Any, spelled: bool = True) -> dict:
     name = _declared_name(finding.get("entity_id", "?"), manifest)
     return {**_subject_keys(name, spelled),
             # THE ENGINE'S SENSE OF THE WORD, which is the envelope this record
@@ -368,7 +352,7 @@ def _finding(finding: dict, manifest: Any, spelled: bool = False) -> dict:
 _DECLINE_NAMED = ("entity_id", "entity_type", "indicator", "axiom", "reason", "detail")
 
 
-def _decline(decline: dict, manifest: Any, spelled: bool = False) -> dict:
+def _decline(decline: dict, manifest: Any, spelled: bool = True) -> dict:
     """One declined evaluation, with the fields that make two of them two.
 
     This kept FOUR keys of the thirteen a decline carries, and `indicator` was
@@ -398,7 +382,7 @@ def _decline(decline: dict, manifest: Any, spelled: bool = False) -> dict:
     return row
 
 
-def _render(entry: dict, manifest: Any, spelled: bool = False) -> dict:
+def _render(entry: dict, manifest: Any, spelled: bool = True) -> dict:
     inner = entry.get("evidence") or {}
     name = _declared_name(entry.get("entity_id", "?"), manifest)
     return {**_subject_keys(name, spelled),

@@ -277,19 +277,15 @@ lists a redundant group's members under `points` and names a counter's under
 `point`, where the earlier ids used the first vertical's words; those ids are read
 exactly as before, old keys included.
 
-**The names that carried another domain's word, and the window they are moving
-in.** A record's subject field, five change kinds, the manifest's list, the class
-behind it and those two input keys were all named after the domain this package
-was extracted from, so every other vertical wrote that domain's noun to reach the
-core. From 0.1.13 each has a neutral name -- `point`, `points`, `GeneratedPoint`,
-`point_removed` and its four siblings -- and **every old name still reads through
-the 0.1 line**: the old keyword is accepted, the old attribute answers, both with
-a `DeprecationWarning` naming the replacement. Reports and attestations are
-written as before unless a caller asks for format 2 (`spelled=True`), which keys
-each record on `point` and the vertical's own word and spells each change kind in
-that word -- so the vertical whose word the old keys were gets back exactly the
-kinds it always emitted. **0.2.0 removes the old names**, and every consumer's
-`<0.2` ceiling keeps it out until that consumer has moved.
+**The names that carried another domain's word, and the window they moved in.**
+A record's subject field, five change kinds, the manifest's list, the class behind
+it and those two input keys were named after the domain this package was extracted
+from; 0.1.13 gave each a neutral name -- `point`, `points`, `GeneratedPoint`,
+`point_removed` and its four siblings -- and read the old ones through the 0.1 line,
+and **0.2.0 removed the old names.** Reports and attestations are format 2: each
+record is keyed on `point` and on the vertical's own word, with change kinds spelled
+in that word, so the vertical whose word the old keys were still gets exactly the
+kinds it always emitted.
 
 ## Adopting a fitted gain
 
