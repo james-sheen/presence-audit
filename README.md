@@ -159,6 +159,12 @@ where the thing is:
 The extra on `factory-line-audit` is not a detail: that package runs a whole
 stage without this one, and only its vertical leg needs a core to register with.
 
+**Until 0.1.12 this table was wrong twice.** It called `factory-line-audit` *source
+only, not on the index* -- true for sixteen hours on 2026-09-09, and false on all
+four pages this package published after, 0.1.8 through 0.1.11 -- and it named two of
+the four verticals that register here. The check that asks the index about each row
+asked only about rows claiming to be on it; it now asks about both.
+
 Install exactly one of them beside this package. None of them is a dependency of
 this one and none ever will be — the arrow points the other way, which is what
 lets the next vertical arrive without any of these knowing.
