@@ -103,12 +103,13 @@ jobs:
           print("  wheel NOTICE names this distribution")
           PY
 
-      - name: Every vertical the README names resolves on the index
+      - name: Every vertical the README names is where its row says
         # The one claim here that no assertion from a tree can reach. The Known
         # verticals section points a reader OUT of this distribution, and
         # whether a name in it was ever published is a fact about the index.
         # The suite checks the group, the variable and the registration; this
-        # checks existence, in the only job that has a network.
+        # checks existence -- and absence, for a row that claims it -- in the
+        # only job that has a network.
         #
         # Kept out of `tests/` deliberately. A network test would skip on a
         # clean clone, and the step above turns a skip into a failure -- so it
@@ -129,11 +130,14 @@ jobs:
           assert linked, "the Known verticals section names no distribution"
           named = [name for name, _ in linked]
 
-          # Only the rows that CLAIM the index are asked about it. A row linked
-          # to a repository is saying the opposite, and `factory-line-audit` is
-          # exactly that -- a real vertical, never uploaded. Requiring every
-          # name to resolve would make the honest row the failing one.
+          # BOTH HOSTS ARE CLAIMS, and both are asked. A row linked to the index
+          # says the name resolves there; a row linked to a repository says it
+          # does not. This asked only the first, and the second is where the
+          # table went wrong: `factory-line-audit` was linked to its repository
+          # on 2026-09-09 as not yet uploaded, was uploaded that evening, and
+          # four published pages of this package went on saying otherwise.
           on_the_index = [name for name, url in linked if "pypi.org" in url]
+          off_the_index = [name for name, url in linked if "pypi.org" not in url]
           assert on_the_index, (
               "no row claims the index, so the resolution check below would "
               "pass over nothing")
@@ -177,18 +181,34 @@ jobs:
               "in the suite ran over an empty word set and proved nothing")
           print("  domain prose was checked against:", ", ".join(sorted(nouns)))
 
-          for name in on_the_index:
+          def answers(name):
               slug = re.sub(r"[-_.]+", "-", name).lower()
               url = f"https://pypi.org/simple/{slug}/"
               try:
                   with urllib.request.urlopen(url, timeout=30) as answer:
-                      code = answer.status
+                      return url, answer.status
               except urllib.error.HTTPError as refused:
-                  code = refused.code
+                  return url, refused.code
+
+          for name in on_the_index:
+              url, code = answers(name)
               assert code == 200, (
                   f"the README sends a reader to {name}, and {url} answers "
                   f"{code}. Either it was never published or it was removed")
               print(f"  {name} resolves on the index")
+
+          # The other direction, and only a 404 answers it: a network failure
+          # raises out of `answers` rather than reading as absence, and any
+          # other code is neither a yes nor a no.
+          for name in off_the_index:
+              url, code = answers(name)
+              assert code == 404, (
+                  f"the README says {name} is not on the index, and {url} "
+                  f"answers {code}. If it is published now, link the row to "
+                  f"the index and say how to install it")
+              print(f"  {name} is not on the index, as its row says")
+          if not off_the_index:
+              print("  no row says it is off the index")
           PY
 
       - name: Hygiene sweep

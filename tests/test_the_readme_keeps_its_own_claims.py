@@ -41,8 +41,11 @@ README = (REPO / "README.md").read_text(encoding="utf-8")
 #: Both hosts are permitted, and WHICH ONE is itself a claim -- an index page
 #: says the thing is on the index, a repository says it is not. Written first
 #: to accept only `pypi.org`, and the check caught the table on the very first
-#: run: `factory-line-audit` is a real vertical, published as a repository and
-#: never uploaded, and the row sent a reader to a 404.
+#: run: `factory-line-audit` was a real vertical published as a repository and
+#: not yet uploaded, and the row sent a reader to a 404. It was uploaded that
+#: evening, and the repository link went on saying otherwise for seventeen
+#: days, because only the rows claiming the index were asked about it.
+#: `checks.yml` asks about both now.
 LINKED = re.compile(
     r"\[`([a-z0-9]+(?:-[a-z0-9]+)+)`\]\((https://[^)\s]+)\)")
 
@@ -144,6 +147,24 @@ class TestItPointsAtAVertical:
         assert wrong == [], (
             f"{wrong} are linked to a repository and the same row tells a "
             f"reader to `pip install` them by name. One of the two is false")
+
+    def test_a_row_on_the_index_says_how_to_install_it(self):
+        """The mirror of the check above. A row linked to the index is saying
+        `pip install <name>` works, and it should say so in the row: a reader
+        choosing a vertical from this table should not have to leave it to
+        learn the command, extra included where the vertical needs one."""
+        section = _section("Known verticals")
+        missing = []
+        for name, url in _named_verticals():
+            if "pypi.org" not in url:
+                continue
+            row = next((line for line in section.splitlines()
+                        if f"`{name}`" in line and line.startswith("|")), "")
+            if not re.search(rf"pip install\s+'?{re.escape(name)}", row):
+                missing.append(name)
+        assert missing == [], (
+            f"{missing} are linked to the index and their rows do not say how "
+            f"to install them by name")
 
     def test_the_group_the_readme_names_is_the_one_the_loader_reads(self):
         """The instruction is only an instruction while the loader agrees. A

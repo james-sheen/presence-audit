@@ -152,7 +152,9 @@ where the thing is:
 | distribution | the domain it supplies | where it is |
 |---|---|---|
 | [`bmc-sensor-audit`](https://pypi.org/project/bmc-sensor-audit/) | server BMC sensors, read over Redfish | on the index: `pip install bmc-sensor-audit` |
-| [`factory-line-audit`](https://github.com/james-sheen/factory-line-audit) | a discrete-manufacturing line, read over OPC UA | source only, not on the index: install the repository with its `vertical` extra |
+| [`factory-line-audit`](https://pypi.org/project/factory-line-audit/) | a discrete-manufacturing line, read over OPC UA | on the index: `pip install 'factory-line-audit[vertical]'` |
+| [`engagement-deliverable-audit`](https://pypi.org/project/engagement-deliverable-audit/) | an engagement's deliverables, read from a tracker export | on the index: `pip install engagement-deliverable-audit` |
+| [`operating-health-audit`](https://github.com/james-sheen/operating-health-audit) | an organisation's operating units, read against its operating model | source only, not on the index: install the repository |
 
 The extra on `factory-line-audit` is not a detail: that package runs a whole
 stage without this one, and only its vertical leg needs a core to register with.
