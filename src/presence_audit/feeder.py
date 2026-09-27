@@ -182,6 +182,12 @@ class FeedResult:
     #: How many diff reports were fed. `fed` counts points; this counts the
     #: captures they came from, and zero means none arrived at all.
     reports: int = 0
+    #: Points whose history was fed only from the last capture they missed on,
+    #: by declared name: how many readings were fed, how many were not, and
+    #: which capture broke the run (counted from one). Only a point the engine
+    #: pairs with another is ever cut -- see `_placed` for why, and for what
+    #: the history that was not fed would have cost.
+    cut: dict[str, dict] = field(default_factory=dict)
 
     @property
     def fed_nothing(self) -> bool:
@@ -269,13 +275,17 @@ def feed(session: Any, manifest: Manifest,
     # is only a statement about the spacing it was fitted at.
     result.interval_seconds = float(
         manifest.sampling_interval_s or DEFAULT_SAMPLE_INTERVAL_S)
-    history: dict[str, list[float]] = {}
-    for report in reports:
+    # Each reading keeps the position of the capture it came from, because that
+    # position is the only thing that says which slot of the grid it belongs in.
+    history: dict[str, list[tuple[int, float]]] = {}
+    for position, report in enumerate(reports):
         for match in report.matches:
             if match.live.reading is None:
                 continue
             history.setdefault(match.declared.display_name, []).append(
-                float(match.live.reading))
+                (position, float(match.live.reading)))
+    joined = _joined(manifest)
+    last = len(reports) - 1
 
     current = reports[-1]
     # Current readings by declared name, so a redundant peer's value can be attached
@@ -319,7 +329,7 @@ def feed(session: Any, manifest: Manifest,
             properties[peer_property(peer)] = peer_value
 
         session.add_entity(entity_type, entity_type, properties=properties)
-        series = history.get(name, [])
+        series = _placed(name, history.get(name, []), last, joined, result)
         if series:
             session.add_observations(entity_type, READING, series,
                                      interval_seconds=result.interval_seconds)
@@ -330,7 +340,8 @@ def feed(session: Any, manifest: Manifest,
         # declares the property either way, so nothing goes unread.
         if generated is not None and generated.flow_outputs:
             for peer in generated.flow_outputs:
-                peer_series = history.get(peer, [])
+                peer_series = _placed(peer, history.get(peer, []), last, joined,
+                                      result)
                 if peer_series:
                     session.add_observations(entity_type, peer_property(peer),
                                              peer_series,
@@ -341,6 +352,73 @@ def feed(session: Any, manifest: Manifest,
 
     _wire_couplings(session, manifest, result, registered)
     return result
+
+
+def _joined(manifest: Manifest) -> set[str]:
+    """Points the engine reads beside another point's readings, by declared name.
+
+    The endpoints of every coupling and fault channel, whose edges the engine
+    fits and walks, and a flow's input and outputs, which conservation sums
+    at one instant. Derived from the manifest -- the same declarations `feed`
+    wires -- rather than listed, so a new kind of pairing cannot arrive
+    without this seeing it or a reader seeing that it does not.
+    """
+    names: set[str] = set()
+    for pair in list(manifest.coupled) + list(manifest.channeled):
+        names.update(pair)
+    for point in manifest.points:
+        if point.flow_outputs:
+            names.add(point.declared_name)
+            names.update(point.flow_outputs)
+    return names
+
+
+def _placed(name: str, readings: Sequence[tuple[int, float]], last: int,
+            joined: set[str], result: FeedResult) -> list[float]:
+    """The readings of one point to feed, in the only slots they can occupy.
+
+    A series goes to the engine as a ladder: one reading per grid slot, the
+    newest one slot before the engine's clock. A ladder has no way to say
+    *nothing here*, so a capture where the point did not read closes up, and
+    every reading before it lands one slot later than the capture it came from.
+
+    **Harmless for a point judged alone, and wrong for one read beside
+    another.** A coupling is fitted by pairing the driver at one slot with the
+    driven a declared delay later, so one shifted series pairs every earlier
+    driver reading with the wrong capture of the driven. Measured on a driven
+    series generated from its driver at exactly one interval, 200 captures,
+    true gain 0.004: complete, the fit recovers 0.004; with the driver missing
+    ONE reading at capture 191, it returned -0.0021 with an interval of
+    [-0.0026, -0.0016] -- the wrong sign, the truth excluded, and the number an
+    `adopt` would have written down. Twenty whole captures missing moved the
+    same fit only to 0.00395, because every series then closes up together.
+
+    So a joined point is fed its unbroken run of readings ending at the last
+    capture, which lands each one in its own capture's slot, and the rest are
+    counted in `result.cut` rather than fed out of place. That discards
+    history, and says how much. Keeping it needs each capture placed by its
+    own time, snapped to the slot it falls in, which this package does not do
+    yet; the README says what that waits for.
+
+    An unjoined point is fed as it always was: its closed-up history still
+    answers stuck-at, and cutting it would put a point that both sticks and
+    stops reading back into warm-up every time it stopped.
+    """
+    values = [value for _, value in readings]
+    if name not in joined:
+        return values
+    kept: list[float] = []
+    expected = last
+    for position, value in reversed(readings):
+        if position != expected:
+            break
+        kept.append(value)
+        expected -= 1
+    kept.reverse()
+    if len(kept) < len(values):
+        result.cut[name] = {"fed": len(kept), "not_fed": len(values) - len(kept),
+                            "missed": expected + 1, "captures": last + 1}
+    return kept
 
 
 def _wire_couplings(session: Any, manifest: Manifest, result: FeedResult,

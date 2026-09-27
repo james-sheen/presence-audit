@@ -677,6 +677,22 @@ def detect_as_text(outcome, feed_result) -> str:
         lines.append(f"  Couplings fitted     {len(feed_result.coupled):>5}"
                      f"   on a {feed_result.interval_seconds:g} s grid")
 
+    cut = getattr(feed_result, "cut", None)
+    if cut:
+        # Said wherever it happens, because a fit on the readings after a missed
+        # one is a fit on fewer readings than the captures suggest, and a reader
+        # comparing its sample count against the number of captures would
+        # otherwise find a discrepancy nothing explains.
+        shown = sorted(cut.items())[:5]
+        lines.append("")
+        lines.append(f"  Fed from a missed reading on -- {len(cut)} {singular}(s) read "
+                     "beside another, whose earlier readings would land out of place:")
+        for name, entry in shown:
+            lines.append(f"      {name}: {entry['fed']} fed, {entry['not_fed']} not; "
+                         f"missed capture {entry['missed']} of {entry['captures']}")
+        if len(cut) > len(shown):
+            lines.append(f"      ... and {len(cut) - len(shown)} more")
+
     warming = feed_result.warming_up
     if warming:
         shown = sorted(warming.items())[:5]

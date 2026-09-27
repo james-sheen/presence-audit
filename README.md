@@ -213,6 +213,38 @@ distribution in the family whose empty dependency list is asserted by
 with the verticals because they are what construct a session, and they are
 therefore the only ones who can say which engine releases they need.
 
+## Where a reading lands in time
+
+`feed()` places captures by their ORDER, not by their clock. Each capture you
+pass is one slot on the declared `sampling_interval_s` grid, oldest first. The
+newest capture takes the slot just before the engine's clock. A capture's own
+`captured_at` is not read. A vertical that feeds one capture per cycle, with the
+engine's clock pinned to that cycle, is therefore exact. A run over several
+recorded captures is exact only when they were taken one interval apart, with
+none missing.
+
+**A capture that was never taken closes up.** After a missed cycle or a
+restart, the readings on either side of the gap are fed one interval apart.
+Measured on a coupling fit, true gain 0.004 over two hundred captures: twenty
+consecutive missing captures moved it to 0.00395, and its interval still held
+the truth.
+
+**A missed reading used to be worse, and since 0.2.3 it costs history
+instead.** When one point failed to read in one capture, its earlier readings
+shifted a slot against every point that did read. On the same fit, a driver
+missing one reading at capture 191 gave -0.0021 with the truth outside the
+interval. Now a point read beside another is fed from its last missed reading
+on: a coupling or fault channel endpoint, or a flow's input or output.
+`FeedResult.cut` names each such point and what was not fed, and `detect`'s
+report prints it. A point read alone is fed as before.
+
+**The fix for both is not built yet.** It would snap each capture to the slot
+its `captured_at` falls in, keep the gaps, and refuse two captures in one slot.
+That would also recover the history the cut discards. It waits for the first
+series recorded from real hardware, because the snapping rule has to be right
+about real stamps: how far they drift from the grid, and how often two land in
+one slot. A fixture's stamps cannot answer either question.
+
 ## The published names do not move
 
 Two kinds of name in this package's output are deliberately not free to change,
