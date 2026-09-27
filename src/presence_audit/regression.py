@@ -112,6 +112,17 @@ class RegressionReport:
     def regressions(self) -> list[Change]:
         return [c for c in self.changes if c.is_regression]
 
+    @property
+    def compared_nothing(self) -> bool:
+        """Neither capture held a single point, so no change could be seen.
+
+        Two empty captures pair nothing, remove nothing and add nothing, and a
+        report of *no changes* over them reads exactly like an upgrade that
+        changed nothing. Derived from the counts rather than stored beside
+        them, so the flag cannot disagree with the numbers it summarises.
+        """
+        return self.before_count == 0 and self.after_count == 0
+
     def counts(self) -> dict[str, int]:
         by_kind: dict[str, int] = {}
         for change in self.changes:

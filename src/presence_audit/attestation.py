@@ -154,6 +154,19 @@ def validate_attestation(artifact: Any) -> list[str]:
                 "engine.schema_version is absent; without it the artifact does not "
                 "record which envelope contract the judgment was made under")
 
+    # AN ATTESTATION OF NOTHING. A run that put no entity in front of the engine
+    # evaluated nothing and found nothing, and its artifact validated -- a record
+    # that reads exactly like a clean machine. Only an explicit zero is refused:
+    # an artifact with no `checked` block at all predates the count and cannot
+    # say, and refusing it would make an older file wrong for lacking a newer
+    # field, the same rule the verdict block follows above.
+    checked = artifact.get("checked")
+    if isinstance(checked, dict) and checked.get("entities") == 0:
+        problems.append(
+            "checked.entities is 0: the run this artifact records put nothing in "
+            "front of the engine, so it attests nothing -- and an empty judgment "
+            "reads exactly like a clean one")
+
     for key in ("unattested", "unread_feeds"):
         if not isinstance(artifact.get(key), list):
             problems.append(

@@ -179,6 +179,22 @@ class FeedResult:
     #: a fitted gain is only meaningful against the spacing it was fitted at,
     #: and until 0.1.10 this was 60 whatever the file said.
     interval_seconds: float = 0.0
+    #: How many diff reports were fed. `fed` counts points; this counts the
+    #: captures they came from, and zero means none arrived at all.
+    reports: int = 0
+
+    @property
+    def fed_nothing(self) -> bool:
+        """No report reached this feed, so the session holds nothing from it.
+
+        The compose rule applied to a feed: composing nothing is could-not-
+        complete, never clean. `feed` of no reports used to return a result
+        indistinguishable from one where every point was skipped, and a check
+        over such a session reads exactly like a healthy system. Marked rather
+        than raised, because `2` is the caller's to give -- as
+        `DetectOutcome.exit_code` already says of itself.
+        """
+        return self.reports == 0
 
     @property
     def warming_up(self) -> dict[str, int]:
@@ -228,9 +244,10 @@ def feed(session: Any, manifest: Manifest,
     liveness has one sample and will say so.
     """
     if not reports:
+        # Marked, not raised: `reports == 0` is what `fed_nothing` reads.
         return FeedResult()
 
-    result = FeedResult()
+    result = FeedResult(reports=len(reports))
     #: Entity types that actually reached the session, so a coupling is wired
     #: only between two things that are in it.
     registered: set[str] = set()

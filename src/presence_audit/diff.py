@@ -485,11 +485,22 @@ def _compare(declaration: DeclarationSource, walk: Capture, *,
         # Withheld on purpose. See the module docstring.
         report.absence_withheld = True
         report.unmatched_declared = []
-        findings.append(Finding(
-            "walk_incomplete", "(walk)",
-            f"{len(walk.errors)} fetch(es) failed, so absence cannot be "
-            f"distinguished from an unread subtree. Absence findings are "
-            f"withheld: first error was {walk.errors[0][0]} ({walk.errors[0][1]})"))
+        errors = list(walk.errors)
+        if errors:
+            why = (f"{len(errors)} fetch(es) failed, so absence cannot be "
+                   f"distinguished from an unread subtree. Absence findings are "
+                   f"withheld: first error was {errors[0][0]} ({errors[0][1]})")
+        else:
+            # THE PROTOCOL CALLS THIS HONEST: a capture may decline to record
+            # per-pass errors, and `complete` is where its claim lives. Quoting
+            # a first error it never recorded raised IndexError -- a traceback
+            # that exits 1, which this family reads as FINDINGS -- and the
+            # conformance kit's own stand-in produces exactly this capture when
+            # it holds no sample.
+            why = ("the capture marks itself incomplete and records no failed "
+                   "fetch, so absence cannot be distinguished from an unread "
+                   "subtree. Absence findings are withheld")
+        findings.append(Finding("walk_incomplete", "(walk)", why))
 
     report.findings = findings
     return report

@@ -430,6 +430,9 @@ def _regression_as_json(report: RegressionReport, *, before: str, after: str,
         "format": REPORT_FORMAT,
         "before": before, "after": after,
         "walks_complete": report.complete,
+        # Additive: a pair of captures holding no point at all, which "no
+        # changes" would otherwise describe as clean.
+        "compared_nothing": report.compared_nothing,
         "absence_changes_withheld": report.absence_withheld,
         "fields_comparable": report.fields_comparable,
         **_count_keys(report.before_count, report.after_count, spelled),
@@ -494,6 +497,17 @@ def _regression_as_text(report: RegressionReport, *, before: str, after: str) ->
         lines.append("  before walks recorded object properties. Re-capture both to")
         lines.append("  compare them.")
     lines.append("")
+
+    if report.compared_nothing:
+        # Before the no-changes line, which would otherwise be printed over an
+        # empty pair and say that every point reported before still is -- of
+        # which there were none.
+        lines.append(f"  Nothing compared: neither capture holds a single {singular},")
+        lines.append("  so no change could have been seen. This is not a clean")
+        lines.append("  comparison.")
+        lines.append("")
+        if not report.changes:
+            return "\n".join(lines)
 
     if not report.changes:
         lines.append(f"  No changes. Every {singular} reported before is reported now,")
@@ -616,6 +630,9 @@ def detect_as_text(outcome, feed_result) -> str:
         lines.append(f"     {outcome.schema_mismatch}")
         lines.append("")
     lines.append(f"  fed to the engine    {feed_result.fed:>5}")
+    if getattr(feed_result, "fed_nothing", False):
+        lines.append("  ** NOTHING FED ** no capture reached this feed, so the checks")
+        lines.append(f"     below cannot tell a healthy system from one with no {singular}")
     if feed_result.skipped_not_reading:
         lines.append(f"  not reading, skipped {feed_result.skipped_not_reading:>5}"
                      "   (Stage 1 owns absence; the engine is not asked)")

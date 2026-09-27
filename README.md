@@ -92,6 +92,15 @@ with the raw value kept beside it, and **composing nothing is `2`** — a batter
 whose legs all failed to be collected has not come out clean. That last case is
 why this is a function and not `max()`.
 
+**A run over nothing says so, at every door that could report it clean.** A
+`feed` of no reports marks its result `fed_nothing`; `compare_walks` over two
+captures holding no point marks its report `compared_nothing`, which the JSON
+carries and the text says in place of *no changes*; `compare` withholds absence
+from an incomplete capture that records no error, rather than raising on the error
+it does not have; and `validate_attestation` refuses an artifact whose run put no
+entity in front of the engine. None of them is scored here -- the exit code stays
+the caller's, and by the rule above a caller reads each as `2`.
+
 **The floors are not here and will not be.** Which finding class or decline
 reason floors at which code depends on what the axiom means where you are and
 how often it fires on a healthy population. A package that cannot see a domain
