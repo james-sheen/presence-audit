@@ -226,7 +226,10 @@ and the limit is stated rather than papered over**: builds already released
 cannot learn it, and the format id is what protects those. Two mechanisms, two
 populations, neither replacing the other. The declared key sets are checked
 against what the loader actually reads, in both directions, by a test that
-derives them from its source.
+derives them from its source. **Every block refuses a key it does not read**, the
+three oldest included: a redundant group and a counter accept their format's
+member word and a vertical's own, exactly where the reader reads each, and a
+block naming its members under both is refused rather than read under one.
 
 **The supplemental set went to three, and this is the saying-why.**
 `presence-audit/supplemental/2` was cut because a new block in `/1` is invisible

@@ -257,12 +257,8 @@ _DIRECTIONS = ("increasing", "decreasing")
 #: verb in a vertical sets `gain` and `gain_basis` from a fitted proposal, and
 #: a near-miss on either leaves a file that reads as adopted and is not.
 #:
-#: THE OTHER THREE BLOCK TYPES ARE NOT CHECKED THIS WAY YET, and that is named
-#: rather than quietly left: `redundant_groups`, `counters` and `flows` all
-#: accept a vertical's own noun as an alias for the published one, so their
-#: permitted set is per-vertical and deciding it is a design question rather
-#: than a typo fix. A coupling names its ends `from` and `to`, which are
-#: nobody's domain word, so it has one answer.
+#: The three older block types are checked the same way -- see
+#: `REDUNDANT_GROUP_KEYS` below for how an alias joins a closed set.
 #:
 #: PER FORMAT, because a key added inside a block is exactly as invisible to an
 #: older reader as a block added to a document -- see `ACCEPTED_FORMATS`. Only
@@ -287,6 +283,23 @@ COUPLING_KEYS_BY_FORMAT = {
 
 #: Every key a coupling may carry under the newest format.
 COUPLING_KEYS = COUPLING_KEYS_BY_FORMAT[FORMAT]
+
+#: The keys the three older block types read, beside their member key. A
+#: misspelled `tolerance`, `loss_margin` or `allow_reset` loaded, and was the
+#: default -- a default nobody chose, which the required `basis` exists to
+#: prevent one level up. Each has carried these keys since the first format,
+#: so one set per block type serves every id.
+#:
+#: HOW AN ALIAS JOINS A CLOSED SET: exactly as it is read. A redundant group
+#: and a counter name their members with the format's word or the vertical's
+#: own (`_member`), so each block reads this set PLUS the member keys
+#: `_member_keys` computes -- from the same `_own` the reader asks, so the
+#: check accepts precisely what the reader reads, per vertical, and nothing
+#: else. A flow names its ends `input` and `outputs`, which are nobody's
+#: domain word, so it has one answer, as a coupling does.
+REDUNDANT_GROUP_KEYS = frozenset({"basis", "tolerance", "tolerance_absolute"})
+COUNTER_KEYS = frozenset({"basis", "direction", "allow_reset"})
+FLOW_KEYS = frozenset({"input", "outputs", "basis", "loss_margin"})
 
 #: The time courses the engine knows. Restated rather than imported for the reason
 #: `DEFAULT_TOLERANCE` is: Stage 1 must not import the engine.
@@ -514,6 +527,42 @@ def _member(block: dict, plural: bool, declared_format: str):
     return _either(block, MEMBER_KEYS_BY_FORMAT[declared_format][0 if plural else 1])
 
 
+def _member_keys(plural: bool, declared_format: str) -> frozenset:
+    """Every key `_member` reads a block's members under: the format's word,
+    and the vertical's own where it has one."""
+    keys = {MEMBER_KEYS_BY_FORMAT[declared_format][0 if plural else 1]}
+    own = _own(plural=plural)
+    if own is not None:
+        keys.add(own)
+    return frozenset(keys)
+
+
+def _refuse_unread(block: dict, where: str, reads: frozenset) -> None:
+    """Refuse a key this block does not read, naming what it does read."""
+    unknown = sorted(set(block) - reads)
+    if unknown:
+        raise SupplementalError(
+            f"{where} declares {unknown}, which this block does not read; it "
+            f"reads {sorted(reads)}")
+
+
+def _refuse_both_spellings(block: dict, where: str, plural: bool,
+                           declared_format: str) -> None:
+    """A block naming its members under BOTH spellings is read under one.
+
+    `_either` takes the vertical's own word when it is present, so the list
+    under the format's word was dropped without a word -- and it was the list
+    the published documentation told the author to write.
+    """
+    both = sorted(key for key in _member_keys(plural, declared_format)
+                  if key in block)
+    if len(both) > 1:
+        raise SupplementalError(
+            f"{where} names its members under both {both}; the block reads "
+            f"{_own(plural=plural)!r} and would drop the other without a "
+            f"word. Keep one")
+
+
 def _either(block: dict, key: str):
     """A block's value under its format's key OR the domain's own word for it.
 
@@ -598,6 +647,9 @@ def load_supplemental(path: str | Path) -> Supplemental:
         where = f"{path}: redundant_groups[{index}]"
         if not isinstance(block, dict):
             raise SupplementalError(f"{where} is not an object")
+        _refuse_unread(block, where,
+                       REDUNDANT_GROUP_KEYS | _member_keys(True, declared_format))
+        _refuse_both_spellings(block, where, True, declared_format)
         members = _member(block, True, declared_format)
         if not isinstance(members, list) or len(members) < 2:
             raise SupplementalError(
@@ -626,6 +678,7 @@ def load_supplemental(path: str | Path) -> Supplemental:
         where = f"{path}: flows[{index}]"
         if not isinstance(block, dict):
             raise SupplementalError(f"{where} is not an object")
+        _refuse_unread(block, where, FLOW_KEYS)
         outputs = block.get("outputs")
         if not isinstance(outputs, list) or not outputs:
             raise SupplementalError(
@@ -808,6 +861,9 @@ def load_supplemental(path: str | Path) -> Supplemental:
         where = f"{path}: counters[{index}]"
         if not isinstance(block, dict):
             raise SupplementalError(f"{where} is not an object")
+        _refuse_unread(block, where,
+                       COUNTER_KEYS | _member_keys(False, declared_format))
+        _refuse_both_spellings(block, where, False, declared_format)
         direction = str(block.get("direction") or "increasing")
         if direction not in _DIRECTIONS:
             raise SupplementalError(
