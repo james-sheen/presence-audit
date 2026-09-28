@@ -118,6 +118,12 @@ class DiffReport:
     # who cannot tell a manufacturer's declaration from a snapshot of one machine is
     # being handed the second while reading it as the first.
     declaration_sources: list = field(default_factory=list)
+    #: When the capture this report was built from was taken, exactly as the
+    #: capture states it (`Capture.captured_at`), copied and never parsed here.
+    #: The report dropped it until 0.2.4, so a run over several captures could
+    #: only be placed in time by their order; `feed(..., timed_by="captured_at")`
+    #: reads it.
+    captured_at: Any = None
 
     @property
     def regressions(self) -> list[Finding]:
@@ -356,7 +362,11 @@ def _compare(declaration: DeclarationSource, walk: Capture, *,
              include_disabled_in_config: bool = False) -> DiffReport:
     report = DiffReport(walk_complete=walk.complete,
                         declaration_sources=list(declaration.sources),
-                        vocabulary=_vocabulary._ACTIVE.get())
+                        vocabulary=_vocabulary._ACTIVE.get(),
+                        # The protocol declares it; `getattr` because a capture
+                        # built before the report carried it may still lack it,
+                        # and a comparison must not fail for want of a time.
+                        captured_at=getattr(walk, "captured_at", None))
     findings: list[Finding] = []
 
     # EVERY declared point is paired, including the ones the declaration marks

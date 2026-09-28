@@ -215,35 +215,58 @@ therefore the only ones who can say which engine releases they need.
 
 ## Where a reading lands in time
 
-`feed()` places captures by their ORDER, not by their clock. Each capture you
-pass is one slot on the declared `sampling_interval_s` grid, oldest first. The
-newest capture takes the slot just before the engine's clock. A capture's own
-`captured_at` is not read. A vertical that feeds one capture per cycle, with the
-engine's clock pinned to that cycle, is therefore exact. A run over several
-recorded captures is exact only when they were taken one interval apart, with
-none missing.
+`feed()` places captures in time in one of two ways, and `FeedResult.timing`
+says which.
 
-**A capture that was never taken closes up.** After a missed cycle or a
-restart, the readings on either side of the gap are fed one interval apart.
-Measured on a coupling fit, true gain 0.004 over two hundred captures: twenty
-consecutive missing captures moved it to 0.00395, and its interval still held
-the truth.
+**By their order, the default.** Each capture you pass is one slot on the
+declared `sampling_interval_s` grid, oldest first. The newest takes the slot
+just before the engine's clock, and a capture's own `captured_at` is not read. A
+vertical that feeds one capture per cycle, with the engine's clock pinned to
+that cycle, is therefore exact. A run over several recorded captures is exact
+only when they were taken one interval apart, with none missing:
 
-**A missed reading used to be worse, and since 0.2.3 it costs history
-instead.** When one point failed to read in one capture, its earlier readings
-shifted a slot against every point that did read. On the same fit, a driver
-missing one reading at capture 191 gave -0.0021 with the truth outside the
-interval. Now a point read beside another is fed from its last missed reading
-on: a coupling or fault channel endpoint, or a flow's input or output.
-`FeedResult.cut` names each such point and what was not fed, and `detect`'s
-report prints it. A point read alone is fed as before.
+- **A capture that was never taken closes up.** The readings on either side of
+  the gap are fed one interval apart. Measured on a coupling fit, true gain
+  0.004 over two hundred captures: twenty consecutive missing captures moved it
+  to 0.00395, and its interval still held the truth.
+- **A missed reading costs history.** When one point failed to read in one
+  capture, its earlier readings used to shift a slot against every point that
+  did read, and a driver missing one reading at capture 191 fitted -0.0021 with
+  the truth outside the interval. Since 0.2.3 a point read beside another is fed
+  from its last missed reading on: a coupling or fault channel endpoint, or a
+  flow's input or output. `FeedResult.cut` names each such point and what was
+  not fed. A late miss then leaves too few pairs to fit at all. A point read
+  alone is fed as before.
 
-**The fix for both is not built yet.** It would snap each capture to the slot
-its `captured_at` falls in, keep the gaps, and refuse two captures in one slot.
-That would also recover the history the cut discards. It waits for the first
-series recorded from real hardware, because the snapping rule has to be right
-about real stamps: how far they drift from the grid, and how often two land in
-one slot. A fixture's stamps cannot answer either question.
+**By each capture's own time, since 0.2.4** (`feed(..., timed_by="captured_at")`).
+Each capture takes the slot of the grid its `captured_at` falls in, counted back
+from the newest capture's own time. A slot nothing fell in stays empty, and the
+readings go to the engine as `(instant, value)` pairs, so neither a missed
+capture nor a missed reading moves anything and nothing is cut. On the same fit,
+every missed-reading case recovers 0.004 on 197 of the 198 pairs, and twenty
+missing captures recover it on 177.
+
+- **Judge the run as of `FeedResult.judged_at`**, the newest capture's own time.
+  The readings are where they were taken and every window ends at the engine's
+  clock, so judged at a later clock a window can hold none of them. Measured on a
+  frozen reading over twelve captures: judged as of the newest, stuck-at fires;
+  judged at the wall clock, it declines `insufficient_samples` and the run reads
+  clean.
+- **A stamp off the grid takes its nearest slot**, and `timing` reports the
+  largest distance any stamp moved. A collector drifting from its declared
+  cadence shows there, not in the verdict. A stamp exactly half an interval from
+  two slots takes the older one.
+- **Refused with `PlacementError`, before anything is fed**: a capture with no
+  `captured_at` or one that is not ISO 8601, captures out of the order their
+  stamps give, and two captures in one slot. Placing only the stamped captures
+  would put two clocks in one series, and keeping one of two readings at one
+  instant would be choosing which capture to believe.
+
+The grid stays the default because a caller written before 0.2.4 judges at the
+engine's own clock. Moving its captures to the times they were taken would move
+them out of its windows. 0.2.3's README said placement by time waited for a
+series recorded from real hardware. It does not need one to be honest, because
+every snap is reported. What real stamps will tell is how often a run is refused.
 
 ## The published names do not move
 

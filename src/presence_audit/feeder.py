@@ -24,13 +24,22 @@ join either bucket. The engine's reason vocabulary is not exported as a constant
 this classification is built from reasons actually observed — which makes an unknown
 reason a certainty over time, not a hypothetical.
 
+**A capture is placed in time by its order, or by its own stamp.** By order, the
+default, each capture takes one slot of the declared grid, oldest first, ending at
+the engine's clock. By stamp (`timed_by="captured_at"`), each takes the slot its
+`captured_at` falls in, counted back from the newest, and a slot nothing fell in
+stays empty. `FeedResult.timing` says which, so a reader never has to infer the
+clock from the numbers.
+
 Nothing here imports `arbiter_engine` at module scope. Stage 1 must keep running on a
 bench with nothing provisioned.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Sequence
 
 from . import vocabulary as _vocabulary
@@ -38,7 +47,27 @@ from .generator import (COUPLING_RELATION, DEFAULT_SAMPLE_INTERVAL_S, FAULT_RELA
                         READING, Manifest, peer_property)
 
 __all__ = ["FeedResult", "DetectOutcome", "feed", "unmapped_observations",
-           "evaluate", "STUCK_AT_SAMPLE_FLOOR", "ENVELOPE_SCHEMA_VERSION"]
+           "evaluate", "STUCK_AT_SAMPLE_FLOOR", "ENVELOPE_SCHEMA_VERSION",
+           "PlacementError", "TIMED_BY_CAPTURE", "TIMED_BY_INTERVAL"]
+
+#: What `FeedResult.timing` names when each capture took the slot its own
+#: stamp falls in, and when captures took the declared grid in order. The two
+#: words the consulting vertical's feeder already reports under, so a reader of
+#: both learns one vocabulary for one question.
+TIMED_BY_CAPTURE = "captured_at"
+TIMED_BY_INTERVAL = "interval_seconds"
+
+
+class PlacementError(ValueError):
+    """Captures that cannot be placed by their own stamps, and which ones.
+
+    RAISED, unlike everything else `feed` counts. A placement nobody can make
+    leaves nothing fed, and a session holding nothing reads exactly like a
+    healthy one to every check that follows -- so a caller that did not look
+    for a flag would print a clean verdict over no readings. The caller decides
+    what to do instead; placing the captures on the grid by their order is one
+    choice it can make, and say it made.
+    """
 
 # The wire contract this build parses. Versioned separately from the package by the
 # engine, deliberately: `meta.schema_version` describes the ENVELOPE shape and moves
@@ -185,9 +214,21 @@ class FeedResult:
     #: Points whose history was fed only from the last capture they missed on,
     #: by declared name: how many readings were fed, how many were not, and
     #: which capture broke the run (counted from one). Only a point the engine
-    #: pairs with another is ever cut -- see `_placed` for why, and for what
-    #: the history that was not fed would have cost.
+    #: pairs with another is ever cut, and only on the grid -- see `_placed` for
+    #: why, and for what the history that was not fed would have cost.
     cut: dict[str, dict] = field(default_factory=dict)
+    #: How the captures were placed in time. `timed_by` is `interval_seconds`
+    #: when they took the declared grid in order, and `captured_at` when each
+    #: took the slot its own stamp falls in -- then with the first and last
+    #: slot, how many captures filled how many slots, and the largest distance
+    #: a stamp moved to reach its slot, which is where a collector drifting
+    #: from its declared cadence shows. Empty when nothing was fed.
+    timing: dict = field(default_factory=dict)
+    #: The instant to judge a session fed by stamp at: the newest capture's own
+    #: time, because its readings are where they were taken and the engine's
+    #: windows end at its clock. None on the grid, whose ladder ends at the
+    #: engine's clock whatever it reads.
+    judged_at: datetime | None = None
 
     @property
     def fed_nothing(self) -> bool:
@@ -242,13 +283,24 @@ class DetectOutcome:
 
 
 def feed(session: Any, manifest: Manifest,
-         reports: Sequence[Any]) -> FeedResult:
+         reports: Sequence[Any], *,
+         timed_by: str = TIMED_BY_INTERVAL) -> FeedResult:
     """Register entities and history from a chronological run of diff reports.
 
     `reports` runs oldest to newest; the newest supplies current values and all of
     them supply history. Passing a single report is the normal case and simply means
     liveness has one sample and will say so.
+
+    `timed_by` says how each capture is placed in time. `interval_seconds`, the
+    default, places them by their order on the declared grid, as every release
+    before 0.2.4 did. `captured_at` places each by the stamp its report carries,
+    snapped to the slot of the grid it falls in, and keeps the slots nothing fell
+    in empty; judge the session as of `FeedResult.judged_at` after it. Captures
+    that cannot be placed that way raise `PlacementError` before anything is fed.
     """
+    if timed_by not in (TIMED_BY_INTERVAL, TIMED_BY_CAPTURE):
+        raise ValueError(f"timed_by is {TIMED_BY_INTERVAL!r} or "
+                         f"{TIMED_BY_CAPTURE!r}; got {timed_by!r}")
     if not reports:
         # Marked, not raised: `reports == 0` is what `fed_nothing` reads.
         return FeedResult()
@@ -275,6 +327,15 @@ def feed(session: Any, manifest: Manifest,
     # is only a statement about the spacing it was fitted at.
     result.interval_seconds = float(
         manifest.sampling_interval_s or DEFAULT_SAMPLE_INTERVAL_S)
+    # Placed BEFORE anything reaches the session, so captures that cannot be
+    # placed leave it exactly as it was handed over.
+    instants: list[datetime] | None = None
+    if timed_by == TIMED_BY_CAPTURE:
+        instants, result.timing = _instants(reports, result.interval_seconds)
+        result.judged_at = instants[-1]
+    else:
+        result.timing = {"timed_by": TIMED_BY_INTERVAL,
+                         "interval_seconds": result.interval_seconds}
     # Each reading keeps the position of the capture it came from, because that
     # position is the only thing that says which slot of the grid it belongs in.
     history: dict[str, list[tuple[int, float]]] = {}
@@ -329,7 +390,8 @@ def feed(session: Any, manifest: Manifest,
             properties[peer_property(peer)] = peer_value
 
         session.add_entity(entity_type, entity_type, properties=properties)
-        series = _placed(name, history.get(name, []), last, joined, result)
+        series = _series(name, history.get(name, []), last, joined, result,
+                         instants)
         if series:
             session.add_observations(entity_type, READING, series,
                                      interval_seconds=result.interval_seconds)
@@ -340,8 +402,8 @@ def feed(session: Any, manifest: Manifest,
         # declares the property either way, so nothing goes unread.
         if generated is not None and generated.flow_outputs:
             for peer in generated.flow_outputs:
-                peer_series = _placed(peer, history.get(peer, []), last, joined,
-                                      result)
+                peer_series = _series(peer, history.get(peer, []), last, joined,
+                                      result, instants)
                 if peer_series:
                     session.add_observations(entity_type, peer_property(peer),
                                              peer_series,
@@ -397,8 +459,8 @@ def _placed(name: str, readings: Sequence[tuple[int, float]], last: int,
     capture, which lands each one in its own capture's slot, and the rest are
     counted in `result.cut` rather than fed out of place. That discards
     history, and says how much. Keeping it needs each capture placed by its
-    own time, snapped to the slot it falls in, which this package does not do
-    yet; the README says what that waits for.
+    own time, snapped to the slot it falls in, which is what
+    `timed_by="captured_at"` does; this ladder is the grid's alone.
 
     An unjoined point is fed as it always was: its closed-up history still
     answers stuck-at, and cutting it would put a point that both sticks and
@@ -419,6 +481,126 @@ def _placed(name: str, readings: Sequence[tuple[int, float]], last: int,
         result.cut[name] = {"fed": len(kept), "not_fed": len(values) - len(kept),
                             "missed": expected + 1, "captures": last + 1}
     return kept
+
+
+def _series(name: str, readings: Sequence[tuple[int, float]], last: int,
+             joined: set[str], result: FeedResult,
+             instants: Sequence[datetime] | None) -> list:
+    """One point's readings as the engine receives them.
+
+    On the grid, a ladder, cut where a joined point missed a reading. By stamp,
+    `(instant, value)` pairs at the slot each reading's capture took: a pair
+    carries its own time, so a capture the point missed is a slot with nothing
+    in it rather than a shift, and nothing is cut.
+    """
+    if instants is None:
+        return _placed(name, readings, last, joined, result)
+    return [(instants[position], value) for position, value in readings]
+
+
+def _instant(stamp: Any) -> datetime | None:
+    """A capture's stamp as an instant in UTC, or None when it carries none.
+
+    ISO 8601 with a `Z`, with an offset, or with neither -- read as UTC, which
+    is how the engine reads an instant with no zone. Anything else raises
+    `ValueError`: a stamp nobody can place is refused where it is read, not
+    taken as absent.
+    """
+    if stamp is None:
+        return None
+    if isinstance(stamp, datetime):
+        parsed = stamp
+    else:
+        text = str(stamp).strip()
+        if not text:
+            return None
+        if text[-1] in "Zz":
+            text = text[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(text)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _positions(numbers: Sequence[int]) -> str:
+    """`capture 3`, or `captures 3, 7 and 9`, counted from one as `cut` counts."""
+    shown = [str(n) for n in numbers[:5]]
+    more = f" and {len(numbers) - 5} more" if len(numbers) > 5 else ""
+    if len(shown) == 1 and not more:
+        return f"capture {shown[0]}"
+    listed = (", ".join(shown) + more if more
+              else f"{', '.join(shown[:-1])} and {shown[-1]}")
+    return f"captures {listed}"
+
+
+def _instants(reports: Sequence[Any],
+              interval: float) -> tuple[list[datetime], dict]:
+    """The slot each capture's stamp falls in, and the timing that reports it.
+
+    THE GRID IS KEPT, AND ONLY ITS ANCHOR MOVES. The engine pairs one reading
+    with another a declared delay later only at identical instants, and the
+    supplemental format holds every delay to a multiple of the interval. A
+    stamp jittered by a few seconds would align with nothing, so each capture
+    takes the nearest slot of the grid anchored at the newest stamp; the
+    distance it moved is reported, never hidden. A stamp exactly half an
+    interval from two slots takes the older one, so one run always lands one way.
+
+    REFUSED, and no slot guessed, when a capture has no stamp or one that is not
+    a date and time, when the captures are not in the order their stamps give,
+    or when two fall in one slot: two readings of one point at one instant are
+    one reading too many, and keeping either would be choosing which capture to
+    believe.
+    """
+    stamps: list[datetime | None] = []
+    unreadable: list[str] = []
+    for position, report in enumerate(reports, start=1):
+        raw = getattr(report, "captured_at", None)
+        try:
+            stamps.append(_instant(raw))
+        except (TypeError, ValueError):
+            stamps.append(None)
+            unreadable.append(f"capture {position} ({raw!r})")
+    if unreadable:
+        raise PlacementError(
+            f"{', '.join(unreadable[:5])}"
+            f"{f' and {len(unreadable) - 5} more' if len(unreadable) > 5 else ''} "
+            f"cannot be read as a date and time, so no capture was placed by its "
+            f"stamp; give captured_at in ISO 8601")
+    missing = [position for position, when in enumerate(stamps, start=1)
+               if when is None]
+    if missing:
+        raise PlacementError(
+            f"{_positions(missing)} of {len(stamps)} carry no captured_at, so the "
+            f"run cannot be placed by its stamps; placing only the stamped ones "
+            f"would put two clocks in one series")
+    backwards = [position for position in range(2, len(stamps) + 1)
+                 if stamps[position - 1] <= stamps[position - 2]]
+    if backwards:
+        raise PlacementError(
+            f"{_positions(backwards)} {'is' if len(backwards) == 1 else 'are'} "
+            f"stamped no later than the capture before; captures run oldest to "
+            f"newest, and the newest supplies every current reading")
+    anchor = stamps[-1]
+    slots = [math.floor((anchor - when).total_seconds() / interval + 0.5)
+             for when in stamps]
+    shared = [(position - 1, position) for position in range(2, len(slots) + 1)
+              if slots[position - 1] == slots[position - 2]]
+    if shared:
+        pairs = "; ".join(f"captures {a} and {b} ({stamps[a - 1].isoformat()}, "
+                          f"{stamps[b - 1].isoformat()})" for a, b in shared[:3])
+        raise PlacementError(
+            f"{pairs} fall in one slot of the {interval:g} s grid, so one point "
+            f"would carry two readings at one instant; drop one of them, or "
+            f"declare the interval the captures were taken at")
+    instants = [anchor - timedelta(seconds=slot * interval) for slot in slots]
+    moved = max(abs((when - placed).total_seconds())
+                for when, placed in zip(stamps, instants))
+    return instants, {
+        "timed_by": TIMED_BY_CAPTURE, "interval_seconds": interval,
+        "first": instants[0].isoformat(), "last": anchor.isoformat(),
+        "captures": len(stamps), "slots": slots[0] + 1,
+        "empty_slots": slots[0] + 1 - len(stamps),
+        "largest_offset_s": moved}
 
 
 def _wire_couplings(session: Any, manifest: Manifest, result: FeedResult,

@@ -25,6 +25,7 @@ import textwrap
 from typing import Any, Sequence
 
 from .diff import DiffReport
+from .feeder import TIMED_BY_CAPTURE
 from .regression import RegressionReport
 from . import vocabulary as _vocabulary
 from .protocols import Capture
@@ -676,6 +677,17 @@ def detect_as_text(outcome, feed_result) -> str:
         lines.append("")
         lines.append(f"  Couplings fitted     {len(feed_result.coupled):>5}"
                      f"   on a {feed_result.interval_seconds:g} s grid")
+
+    timing = getattr(feed_result, "timing", None) or {}
+    if timing.get("timed_by") == TIMED_BY_CAPTURE:
+        # Said only for a placement by stamp, so a run on the grid prints what it
+        # always printed. The offset is the one number here nothing else shows: a
+        # collector drifting from its declared cadence moves it, not the verdict.
+        lines.append("")
+        lines.append(f"  Placed by capture time -- {timing['captures']} capture(s) in "
+                     f"{timing['slots']} slot(s) of {timing['interval_seconds']:g} s, "
+                     f"{timing['empty_slots']} empty; the largest snap to a slot "
+                     f"was {timing['largest_offset_s']:g} s, as of {timing['last']}")
 
     cut = getattr(feed_result, "cut", None)
     if cut:
