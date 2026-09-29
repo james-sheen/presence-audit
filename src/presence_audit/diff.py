@@ -56,6 +56,23 @@ _SEPARATORS = re.compile(r"[\s_\-]+")
 # variables than the reader silently wildcards the difference.
 
 
+def _shown(reading: Any) -> str:
+    """A reading as a finding shows it: a number through `:g`, anything else as it is.
+
+    The protocol types `CapturedPoint.reading` as `Optional[float]`, and the one line
+    that printed it trusted that. A vertical whose point returned its figure as text --
+    to keep every digit of a balance-sheet total -- took the whole run down there with
+    a `ValueError` about a format code, and a live point with no number did the same
+    with a `TypeError`. The finding is this package's to write; the type is the
+    vertical's to get right, and one is no longer the other's crash.
+    """
+    if reading is None:
+        return "a reading with no number"
+    if isinstance(reading, bool) or not isinstance(reading, (int, float)):
+        return str(reading)
+    return f"{reading:g}"
+
+
 @dataclass(frozen=True)
 class Finding:
     """One thing the comparison found, about one point."""
@@ -452,7 +469,7 @@ def _compare(declaration: DeclarationSource, walk: Capture, *,
                 findings.append(Finding(
                     "disabled_in_config_but_live", name,
                     f"the configuration marks this Status: disabled, and the "
-                    f"machine is reporting {live.reading:g}"
+                    f"machine is reporting {_shown(live.reading)}"
                     f"{' ' + live.units if live.units else ''}",
                     match.declared.source, live.path))
             continue
