@@ -136,6 +136,34 @@ class TestAFaultChannel:
         with pytest.raises(SupplementalError, match="both ends"):
             load_supplemental(_file(fault_channels=[{**CHANNEL, "to": FAN}]))
 
+    @pytest.mark.parametrize("delay", [120, 0])
+    def test_a_delay_reaches_the_rule_where_the_engine_reads_a_dead_time(self, delay):
+        """The engine reads a cause at the finding's instant minus the dead
+        time on each causal edge it crosses, from the rule's `temporal:` block;
+        the file had nowhere to say it, and refused the key by name."""
+        path = _file(sampling_interval_s=60,
+                     fault_channels=[{**CHANNEL, "propagation_delay_s": delay}])
+        assert load_supplemental(path).fault_channels[0].propagation_delay_s == delay
+        rule = _generate(path)[0]["domain"]["relationship_rules"][0]
+        assert rule["temporal"] == {"propagation_delay_s": float(delay)}
+
+    @pytest.mark.parametrize("delay, why", [
+        (90, "Use a multiple of 60"),       # between two collection steps
+        (-60, "zero or more"),
+        ("2m", "zero or more"),
+        (True, "zero or more"),
+        (float("inf"), "zero or more"),
+    ])
+    def test_a_delay_is_held_to_the_grid_a_couplings_is(self, delay, why):
+        with pytest.raises(SupplementalError, match=why):
+            load_supplemental(_file(sampling_interval_s=60, fault_channels=[
+                {**CHANNEL, "propagation_delay_s": delay}]))
+
+    def test_a_delay_needs_the_cadence_it_is_held_to(self):
+        with pytest.raises(SupplementalError, match="sampling_interval_s"):
+            load_supplemental(_file(fault_channels=[
+                {**CHANNEL, "propagation_delay_s": 120}]))
+
     def test_the_feeder_puts_an_edge_under_the_rule(self):
         """A causal rule is about two TYPES; the engine's graph needs an edge
         between two entities, exactly as a coupling's fit does."""

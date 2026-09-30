@@ -344,6 +344,17 @@ lists a redundant group's members under `points` and names a counter's under
 `point`, where the earlier ids used the first vertical's words; those ids are read
 exactly as before, old keys included.
 
+**A fault channel can say how long a failure takes to show, from 0.2.6.**
+`propagation_delay_s` on a `fault_channels` entry is held to the rule a coupling's
+delay is held to -- zero or more, and a whole number of `sampling_interval_s` -- and
+reaches the generated causal rule as `temporal: {propagation_delay_s}`. The engine
+reads the cause that much before the finding, so a cause that has already cleared
+still counts. It is optional, and a file declaring none generates what it always
+did; a build before 0.2.6 refuses the key by name, as it refuses any key it does not
+read. A delay is only as good as the instants the readings are placed at: fed on the
+declared grid, a reading's instant is its place on a ladder ending at the clock, so
+recorded captures are fed `timed_by="captured_at"` once a channel declares one.
+
 **The names that carried another domain's word, and the window they moved in.**
 A record's subject field, five change kinds, the manifest's list, the class behind
 it and those two input keys were named after the domain this package was extracted

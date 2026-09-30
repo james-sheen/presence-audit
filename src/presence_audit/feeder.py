@@ -52,8 +52,8 @@ __all__ = ["FeedResult", "DetectOutcome", "feed", "unmapped_observations",
 
 #: What `FeedResult.timing` names when each capture took the slot its own
 #: stamp falls in, and when captures took the declared grid in order. The two
-#: words the consulting vertical's feeder already reports under, so a reader of
-#: both learns one vocabulary for one question.
+#: words another family feeder already reports under, so a reader of both
+#: learns one vocabulary for one question.
 TIMED_BY_CAPTURE = "captured_at"
 TIMED_BY_INTERVAL = "interval_seconds"
 

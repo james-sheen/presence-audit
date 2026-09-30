@@ -737,6 +737,11 @@ def _generate(declaration: DeclarationSource, *, domain_id: str,
             # that refusal is the answer the file has earned.
             if channel.weight is not None:
                 rule["causal"] = {"weight": channel.weight}
+            # A DELAY ONLY WHERE THE FILE GAVE ONE, under the key the engine reads
+            # a dead time from on a causal edge: the cause is then read that much
+            # before the finding. Without it the cause is read at the finding.
+            if channel.propagation_delay_s is not None:
+                rule["temporal"] = {"propagation_delay_s": channel.propagation_delay_s}
             relationship_rules.append(rule)
             manifest.channeled.append((channel.source, channel.target))
         for action in supplemental.actions:

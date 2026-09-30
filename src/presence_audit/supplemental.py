@@ -234,7 +234,8 @@ MEMBER_KEYS_BY_FORMAT = {
 }
 
 #: Every key a fault channel and an action may carry.
-FAULT_CHANNEL_KEYS = frozenset({"from", "to", "basis", "weight", "weight_basis"})
+FAULT_CHANNEL_KEYS = frozenset({"from", "to", "basis", "weight", "weight_basis",
+                                "propagation_delay_s"})
 ACTION_KEYS = frozenset({"name", "point", "effect", "settle_s", "basis"})
 
 #: What an action does to the value it writes. The engine's own three verbs,
@@ -412,6 +413,11 @@ class FaultChannel:
     `weight` is how strongly, and is absent unless something gives a number:
     the engine refuses to rank along an edge whose strength it would have to
     choose, and that refusal is the honest answer until a basis exists.
+
+    `propagation_delay_s` is how long the failure takes to show, when the file
+    says so. The engine then reads the cause that much earlier than the
+    finding, so a cause that has already cleared still counts. Absent, it is
+    read at the finding's own instant, as it always was.
     """
 
     source: str
@@ -419,6 +425,7 @@ class FaultChannel:
     basis: str
     weight: float | None = None
     weight_basis: str | None = None
+    propagation_delay_s: float | None = None
 
     @property
     def members(self) -> tuple[str, ...]:
@@ -916,11 +923,37 @@ def load_supplemental(path: str | Path) -> Supplemental:
                     f"nothing establishing it is the guess the engine refuses to "
                     f"make itself; leave it out and the ranking says so by name")
             weight = float(weight)
+        # HELD TO THE GRID a coupling's delay is held to, and for its reason: the
+        # engine reads a cause at the finding's instant minus the delay, on the
+        # declared cadence, so a delay between two collection steps names an
+        # instant nothing was read at.
+        delay = block.get("propagation_delay_s")
+        if delay is not None:
+            if isinstance(delay, bool) or not isinstance(delay, (int, float)) \
+                    or not math.isfinite(float(delay)) or float(delay) < 0:
+                raise SupplementalError(
+                    f"{where} declares propagation_delay_s {delay!r}; it is how "
+                    f"long a failure at one end takes to show at the other, a "
+                    f"number of seconds, zero or more")
+            if interval is None:
+                raise SupplementalError(
+                    f"{where} declares a propagation_delay_s and this file states "
+                    f"no sampling_interval_s. The delay has to be a whole number "
+                    f"of collection steps, and that cannot be checked without the "
+                    f"cadence")
+            steps = float(delay) / interval
+            if abs(steps - round(steps)) > 1e-9:
+                raise SupplementalError(
+                    f"{where} declares propagation_delay_s={float(delay):g} against "
+                    f"a sampling_interval_s of {interval:g}, which is {steps:.4g} "
+                    f"collection steps. Use a multiple of {interval:g}")
+            delay = float(delay)
         result.fault_channels.append(FaultChannel(
             source=source, target=target,
             basis=str(_require(block, "basis", where)),
             weight=weight,
-            weight_basis=None if weight_basis is None else str(weight_basis)))
+            weight_basis=None if weight_basis is None else str(weight_basis),
+            propagation_delay_s=delay))
 
     for index, block in enumerate(raw.get("actions") or []):
         where = f"{path}: actions[{index}]"
